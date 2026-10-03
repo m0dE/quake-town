@@ -34,6 +34,7 @@ import { NetSession } from '../net/session.js';
 import { TicRing } from './ring.js';
 import { ViewCalc, poseFrom, newPose, lerpAngle, angleVectors, type SelfPose } from './view.js';
 import { TopDownView, type RendererLike } from './topdown.js';
+import { PausePanel } from './pause.js';
 import { Input, type KeyDest } from '../input/input.js';
 import type { CommandSystem } from '../console/commands.js';
 import type { Console } from '../console/console.js';
@@ -75,6 +76,8 @@ export interface GameOptions {
   userinfo: () => string;
   /** Play this demo instead of connecting. */
   demo?: DemoFile;
+  /** Show the pause panel while the mouse is free (off for scripted tests). */
+  pausePanel?: boolean;
 }
 
 /** One confirmed frame, as the loop keeps it. */
@@ -232,8 +235,16 @@ export class Game {
       this.net.onJoin = (player) => { if (player !== opts.playerId) this.helloAt = Math.min(this.helloAt, performance.now() + 300); };
     }
     addEventListener('resize', this.resize);
+    if (opts.pausePanel !== false) {
+      this.pause = new PausePanel(opts.host, {
+        resume: () => { this.pause?.show(false); this.input.lock(); },
+        leave: () => this.onLeave?.(''),
+        console: () => { this.pause?.show(false); opts.cmds.exec('toggleconsole'); },
+      }, opts.demo ? 'Demo' : 'Quake Town');
+    }
   }
 
+  private pause: PausePanel | null = null;
   private userinfoDirty = false;
 
   private keyDest(): KeyDest {
@@ -248,13 +259,18 @@ export class Game {
     this.renderer = r;
     this.resize();
     try { await r.loadMap(this.mapName); } catch (err) { console.warn(`[game] the renderer could not load ${this.mapName}:`, err); }
-    this.startAmbients(this.mapName);
   }
 
   // ------------------------------------------------------------------ the stream
 
   private onConfirmed(s: QtState, f: number, seeking: boolean): void {
     const sim = this.app.sim;
+    // A catch-up replays history the picture will never show: no copies, only the bookkeeping.
+    if (this.net?.lockstep.catchup.active) {
+      for (let i = 0; i < s.ev.length; i += EVENT_WORDS) if (s.ev[i] === EV_CHANGELEVEL) this.mapStartFrame = f;
+      this.mySlot = this.app.slotOf(s, this.opts.playerId);
+      return;
+    }
     const slot = this.app.slotOf(s, this.opts.playerId);
     this.mySlot = slot;
     const rows = sim.clients(s.h);
@@ -268,14 +284,16 @@ export class Game {
       slots: s.slots.slice(),
     };
     this.confirmed.record(f, snap);
+    if (!Number.isFinite(this.mapStartFrame)) this.mapStartFrame = f - sim.tickCount(s.h);
+    for (let i = 0; i < s.ev.length; i += EVENT_WORDS) if (s.ev[i] === EV_CHANGELEVEL) this.mapStartFrame = f;
+    if (this.app.sim.ex.world_stopped?.(s.h)) this.fatal(`the mod stopped: ${this.app.sim.error()}`);
     // fixangle without a prediction (spectating someone, a demo, before the prediction arms)
     if (snap.cv && snap.cv[CV.fixangle] && (slot < 0 || !this.net?.lockstep.prediction) && f > this.lastFixFrame) {
       this.lastFixFrame = f;
       if (slot >= 0 || this.demo) { const fa = f32(snap.cv); this.input.setAngles(fa[CV.fixAngles], fa[CV.fixAngles + 1]); }
     }
     if (seeking) return;
-    // A catch-up replays history: those frames happened before we were here.
-    if (this.net?.lockstep.catchup.active) return;
+    this.arrivals[this.arrivalAt++ % this.arrivals.length] = performance.now();
     if (s.ev.length) this.cq.push({ frame: f, ev: s.ev, strs: s.strs });
     if (this.cq.length > 600) this.cq.splice(0, this.cq.length - 600);
   }
@@ -442,9 +460,7 @@ export class Game {
         if (name && name !== this.mapName) {
           this.mapName = name;
           void this.renderer?.loadMap(name).catch((e) => console.warn(e));
-          this.startAmbients(name);
         }
-        this.matchBase = this.tickOfFrame(this.lastReleasedOthers);
         return;
       }
       case EV_PICKUP:
@@ -456,8 +472,12 @@ export class Game {
   private matchEnd = 0;
   private matchCountdown = 0;
   /** world tick count at the last changelevel (sim time = 1 + (ticks - base) × 0.013) */
-  private matchBase = 0;
-  private tickOfFrame(_f: number): number { return this.app.sim.tickCount(this.worldH()); }
+  /**
+   * The frame at which the current map started (sim time 1.0): QW's sv.time restarts on a
+   * changelevel. Sim time at frame f = 1 + (f - mapStartFrame) × 0.013.
+   */
+  private mapStartFrame = NaN;
+  private simTimeAt(frame: number): number { return Number.isFinite(this.mapStartFrame) ? 1 + (frame - this.mapStartFrame) * TICK_SECONDS : 1; }
 
   /** QW CL_ParseTEnt's sounds, then the effect for the renderer. */
   private tempEntity(ev: Int32Array, i: number): void {
@@ -630,6 +650,15 @@ export class Game {
   }
 
   private connectedAt = 0;
+  private fatalShown = false;
+
+  /** The world cannot go on (a QuakeC error): say so once, and leave. */
+  private fatal(text: string): void {
+    if (this.fatalShown) return;
+    this.fatalShown = true;
+    this.opts.console.print(`${text}\n`);
+    setTimeout(() => this.onLeave?.(text), 0);
+  }
 
   // ------------------------------------------------------------------ the frame
 
@@ -664,7 +693,11 @@ export class Game {
     return { others: t.others, self: t.self, predicted: t.drawSelfFromPrediction };
   }
 
+  /** rAF timestamp of the last drawn frame (the probe's `at`). */
+  lastDrawAt = 0;
+
   private draw(now: number): void {
+    this.lastDrawAt = now;
     if (!this.drawnSince) this.drawnSince = now;
     this.drawn++;
     this.fpsFrames++;
@@ -676,6 +709,7 @@ export class Game {
     if (this.net?.lockstep.connected && !this.connectedAt) { this.connectedAt = now; if (this.wantPlay) this.join(true); }
     this.chatter(now);
     this.refreshNames(now);
+    if (this.ambientsFor !== this.mapName && this.worldH() && this.audio.ctx?.state === 'running') this.startAmbients(this.mapName);
     this.frame.eventCount = 0;
 
     const cv = this.opts.cvars;
@@ -683,7 +717,7 @@ export class Game {
     const pair = t ? this.confirmed.pair(t.others) : null;
     this.lastTimes = t;
     if (!t || !pair) {
-      this.hudFrame(now, null, null);
+      this.hudFrame(now, null, null, 0);
       return;
     }
     // events of ticks the drawn clocks have reached
@@ -743,8 +777,8 @@ export class Game {
       const vm = f.viewmodel ?? (f.viewmodel = { model: '', frame: 0, prevFrame: -1, frameLerp: 0, effects: 0, bob: 0 });
       vm.model = this.modelName(cb[CV.weaponmodel]);
       vm.frame = cb[CV.weaponframe];
-      vm.prevFrame = ca[CV.weaponframe];
-      vm.frameLerp = cfrac;
+      vm.prevFrame = -1;
+      vm.frameLerp = 0;
       vm.effects = drawCv[CV.effects];
       vm.bob = viewmodelBob;
       if (!vm.model) f.viewmodel = null;
@@ -760,7 +794,7 @@ export class Game {
     const r0 = performance.now();
     this.renderer?.draw(f);
     this.renderMs = performance.now() - r0;
-    this.hudFrame(now, b, drawCv);
+    this.hudFrame(now, b, drawCv, t.others);
   }
 
   private readonly fwd = [0, 0, 0];
@@ -860,8 +894,11 @@ export class Game {
     e.serial = B[ob + E_SERIAL];
     e.model = this.modelName(B[ob + E_MODEL]);
     e.frame = B[ob + E_FRAME];
-    e.prevFrame = A[oa + E_FRAME];
-    e.frameLerp = k;
+    // QW animates at 10 Hz (think every 0.1 s): the renderer lerps a frame change over that
+    // tenth on the drawn sim clock (r_lerpmodels), not over one 13 ms tick.
+    e.prevFrame = -1;
+    e.frameLerp = 0;
+    void A; void oa; void k;
     e.skin = B[ob + E_SKIN];
     e.effects = B[ob + E_EFFECTS];
     const alpha = FB[ob + E_ALPHA];
@@ -929,7 +966,7 @@ export class Game {
 
   // ------------------------------------------------------------------ HUD
 
-  private hudFrame(now: number, snap: Snap | null, cv: Int32Array | null): void {
+  private hudFrame(now: number, snap: Snap | null, cv: Int32Array | null, others: number): void {
     const net = this.net?.stats();
     const st = this.app.stats;
     let notice = this.notice;
@@ -938,7 +975,7 @@ export class Game {
     const rows = snap ? this.scoreRows(now, snap) : { rows: [], teams: [] };
     let match = this.match;
     if (match && cv) {
-      const tnow = 1 + (this.app.sim.tickCount(this.worldH()) - this.matchBase) * TICK_SECONDS;
+      const tnow = this.simTimeAt(others);
       const fcv = f32(cv);
       const phase = cv[CV.phase];
       const end = fcv[CV.phaseEnd] || this.matchEnd;
@@ -962,8 +999,11 @@ export class Game {
         stepUs: st.steps ? (st.stepMs / st.steps) * 1000 : 0, status: this.net?.statusText ?? null,
       },
       consoleFrac: 0,
-      paused: !this.input.locked && this.keyDest() === 'game' && !this.demo,
+      paused: false,
     };
+    const free = !this.input.locked && this.keyDest() === 'game' && !this.demo;
+    if (this.pause) this.pause.show(free && !!snap);
+    else state.paused = free;
     this.hud.frame(state, (d) => { this.opts.console.draw(d, now, !!snap); });
   }
 
@@ -971,20 +1011,57 @@ export class Game {
 
   // ------------------------------------------------------------------ ambient sounds
 
+  private ambientsFor = '';
+  /** Wall-clock arrival of each live confirmed tick (tick stability measurement). */
+  private readonly arrivals = new Float64Array(4096);
+  private arrivalAt = 0;
+
+  /** Intervals between confirmed ticks as this page received them, over the last `n` ticks. */
+  tickStats(n = 2000): { ticks: number; hz: number; meanMs: number; p50: number; p90: number; p99: number; max: number; sd: number; late3: number } | null {
+    const count = Math.min(n, this.arrivalAt, this.arrivals.length) - 1;
+    if (count < 10) return null;
+    const iv: number[] = [];
+    for (let k = this.arrivalAt - count; k < this.arrivalAt; k++) iv.push(this.arrivals[k % this.arrivals.length] - this.arrivals[(k - 1) % this.arrivals.length]);
+    const span = this.arrivals[(this.arrivalAt - 1) % this.arrivals.length] - this.arrivals[(this.arrivalAt - 1 - count) % this.arrivals.length];
+    const sorted = [...iv].sort((a, b) => a - b);
+    const q = (p: number): number => sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))];
+    const mean = iv.reduce((a, b) => a + b, 0) / iv.length;
+    const sd = Math.sqrt(iv.reduce((a, b) => a + (b - mean) * (b - mean), 0) / iv.length);
+    const period = 1000 / TICRATE;
+    return { ticks: count, hz: (count * 1000) / span, meanMs: mean, p50: q(0.5), p90: q(0.9), p99: q(0.99), max: sorted[sorted.length - 1], sd, late3: iv.filter((x) => x > 3 * period).length };
+  }
+
+  /** QW static sounds (ambientsound): from the engine's list, else the map's ambient_* entities. */
   private startAmbients(map: string): void {
+    this.ambientsFor = map;
     this.audio.stopStatics();
-    if (!this.opts.vfs || this.opts.cvars.num('ambient_level') === 0) return;
+    const level = this.opts.cvars.has('ambient_level') ? this.opts.cvars.num('ambient_level') : 0.3;
+    if (level <= 0) return;
+    const vol = Math.min(1, level / 0.3);
+    const h = this.worldH();
+    const ex = this.app.sim.ex;
+    if (h && ex.world_ambients) {
+      const ptr = ex.world_ambients(h);
+      if (ptr) {
+        const n = new Uint32Array(ex.memory.buffer, ptr, 1)[0];
+        const w = new Int32Array(ex.memory.buffer, ptr + 4, n * 6).slice();
+        const fw = new Float32Array(w.buffer);
+        for (let i = 0; i < n; i++) {
+          const o = i * 6;
+          this.audio.startStatic(this.soundName(w[o]), [fw[o + 3], fw[o + 4], fw[o + 5]], (w[o + 1] / 255) * vol, w[o + 2] / 64);
+        }
+        return;
+      }
+    }
+    if (!this.opts.vfs) return;
     const bsp = this.opts.vfs.get(`maps/${map}.bsp`);
     if (!bsp) return;
-    const text = bspEntities(bsp);
-    const vol = this.opts.cvars.has('ambient_level') ? Math.min(1, this.opts.cvars.num('ambient_level') * 2) : 0.6;
-    for (const m of text.matchAll(/\{([^}]*)\}/g)) {
+    for (const m of bspEntities(bsp).matchAll(/\{([^}]*)\}/g)) {
       const cls = /"classname"\s+"([^"]+)"/.exec(m[1])?.[1] ?? '';
       const amb = AMBIENT_SOUNDS[cls];
       if (!amb) continue;
       const o = (/"origin"\s+"([^"]+)"/.exec(m[1])?.[1] ?? '0 0 0').split(/\s+/).map(Number);
-      // QW ambientsound: ATTN_STATIC (3)
-      this.audio.startStatic(amb[0], o, amb[1] * vol, 3);
+      this.audio.startStatic(amb[0], o, amb[1] * vol, 3);       // ATTN_STATIC
     }
   }
 
@@ -1046,6 +1123,7 @@ export class Game {
     this.opts.console.onChat = null;
     this.opts.console.onToggle = null;
     this.hud.dispose();
+    this.pause?.dispose();
     this.audio.dispose();
     this.renderer?.dispose?.();
     this.canvas.remove();
@@ -1090,7 +1168,7 @@ export class Game {
     let frags = 0;
     if (snap) for (let s = 0; s < snap.rows.length / ROW_WORDS; s++) frags += snap.rows[s * ROW_WORDS + R_FRAGS];
     const frame = ls?.frame ?? 0;
-    return { frame, hash: ls?.world.hashAt(frame - 2), frags };
+    return { frame, hash: ls?.world.hashAt((frame - 8) & ~3), frags };
   }
 
   /** For the arena probe: the confirmed sim's remote bodies (metres) at the newest frame. */

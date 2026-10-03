@@ -35,6 +35,8 @@ pub mod world;
 
 #[cfg(feature = "vm")]
 pub use world::World;
+#[cfg(feature = "vm")]
+pub use qcvm;
 
 /// Bumped on any change to behaviour or layout (ABI `sim_version`).
 pub const SIM_VERSION: u32 = 1;

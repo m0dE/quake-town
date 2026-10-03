@@ -42,7 +42,9 @@ export interface ModeInfo {
 /**
  * LibreQuake lqdm1–13 (BSD-3). Sizes and spawn counts measured 2026-10-03:
  * small = lqdm11, lqdm12, lqdm2, lqdm1, lqdm13, lqdm8; large = lqdm3, lqdm7, lqdm5, lqdm9.
- * qt_aero is the content part's original map (modes duel, 2on2, ffa, ca in its index entry).
+ * Original maps (content part): qt_aero (1on1), qt_tower (dm6-style, 2-4 players), qt_fort
+ * (big 4on4, and the CTF map: item_flag_team1/2). lqdm maps also work for CTF: the mod places
+ * flags at far-apart spawns.
  */
 export const MODES: Readonly<Record<Mode, ModeInfo>> = {
   ffa: {
@@ -53,22 +55,22 @@ export const MODES: Readonly<Record<Mode, ModeInfo>> = {
   duel: {
     id: 'duel', label: 'Duel', short: 'Duel', blurb: 'One on one. Ready up, ten minutes, sudden overtime.',
     deathmatch: 3, teamplay: 0, timelimit: 10, fraglimit: 0, limitLabel: 'Frag limit', maxclients: 2, bots: false,
-    teams: false, readyUp: true, rotation: ['qt_aero', 'lqdm11', 'lqdm12', 'lqdm2', 'lqdm13', 'lqdm1', 'lqdm8'],
+    teams: false, readyUp: true, rotation: ['qt_aero', 'qt_tower', 'lqdm11', 'lqdm12', 'lqdm2', 'lqdm13', 'lqdm1', 'lqdm8'],
   },
   '2on2': {
     id: '2on2', label: '2 on 2', short: '2on2', blurb: 'Two teams of two. No team damage to health.',
     deathmatch: 3, teamplay: 2, timelimit: 10, fraglimit: 0, limitLabel: 'Frag limit', maxclients: 4, bots: true,
-    teams: true, readyUp: true, rotation: ['lqdm2', 'qt_aero', 'lqdm1', 'lqdm8', 'lqdm13', 'lqdm4'],
+    teams: true, readyUp: true, rotation: ['qt_tower', 'lqdm2', 'qt_aero', 'lqdm1', 'lqdm8', 'lqdm13', 'lqdm4'],
   },
   '4on4': {
     id: '4on4', label: '4 on 4', short: '4on4', blurb: 'Team deathmatch. Weapons are taken and respawn.',
     deathmatch: 1, teamplay: 2, timelimit: 20, fraglimit: 0, limitLabel: 'Frag limit', maxclients: 8, bots: true,
-    teams: true, readyUp: true, rotation: ['lqdm3', 'lqdm7', 'lqdm6', 'lqdm10', 'lqdm4'],
+    teams: true, readyUp: true, rotation: ['qt_fort', 'lqdm3', 'lqdm7', 'lqdm6', 'lqdm10', 'lqdm4'],
   },
   ctf: {
     id: 'ctf', label: 'Capture the Flag', short: 'CTF', blurb: 'Take their flag home. 15 points a capture.',
     deathmatch: 3, teamplay: 1, timelimit: 20, fraglimit: 0, limitLabel: 'Capture limit', maxclients: 16, bots: true,
-    teams: true, readyUp: true, rotation: [],
+    teams: true, readyUp: true, rotation: ['qt_fort', 'lqdm3', 'lqdm7', 'lqdm10', 'lqdm6'],
   },
   ca: {
     id: 'ca', label: 'Clan Arena', short: 'CA', blurb: 'Rounds. Full stack, no items, last team standing.',

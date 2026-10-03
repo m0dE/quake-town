@@ -26,7 +26,7 @@ try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
   page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
   page.on('console', (m) => { if (m.type() === 'error') errors.push(`console: ${m.text()}`); });
-  const url = `${BASE}?offline=1&map=${MAP}&name=smoke${FAKE ? '&fake=1' : ''}`;
+  const url = `${BASE}?offline=1&map=${MAP}&test=1&name=smoke&maxclients=${arg('max', '4')}${FAKE ? '&fake=1' : ''}`;
   console.log(`open ${url}`);
   await page.goto(url);
   await page.waitForFunction(() => window.__game && window.__game.debug().slot >= 0, null, { timeout: 90_000 });

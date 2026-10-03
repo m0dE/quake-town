@@ -30,6 +30,8 @@ pub enum LinkKind {
     Drop = 2,
     Teleport = 3,
     Plat = 4,
+    /// trigger_push (jump pad / wind tunnel)
+    Push = 5,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -86,6 +88,7 @@ pub struct NavStats {
     pub drop: u32,
     pub teleport: u32,
     pub plat: u32,
+    pub push: u32,
     pub goals: u32,
     pub build_traces: u32,
 }
@@ -104,13 +107,15 @@ pub struct NavGraph {
     pub goals: Vec<Goal>,
     /// goals.len() × nodes.len() distances (FIELD_Q units), FIELD_INF unreachable.
     fields: Vec<u16>,
+    /// Goal indices used as ALT landmarks for A* (spread over the map).
+    landmarks: Vec<usize>,
     stats: NavStats,
 }
 
 const CELL: f32 = 64.0;
 
 struct Builder<'a, W: BotWorld> {
-    w: &'a W,
+    w: &'a mut W,
     traces: u32,
     nodes: Vec<Vec3>,
     flags: Vec<u32>,
@@ -127,6 +132,7 @@ fn kind_cost(kind: LinkKind, d: f32) -> f32 {
         LinkKind::Drop => d * 1.1 + 8.0,
         LinkKind::Teleport => 32.0,
         LinkKind::Plat => d + 160.0,
+        LinkKind::Push => d * 0.5 + 32.0,
     }
 }
 
@@ -238,7 +244,15 @@ impl<'a, W: BotWorld> Builder<'a, W> {
             let u = up.endpos;
             let fw = self.tr(u, [x, y, u[2]]);
             if fw.fraction < 1.0 {
-                return Step::Blocked;
+                // steep stairs (e.g. 12 high, 8 deep): pmove climbs them a few units per
+                // frame; retry this substep in 4-unit micro steps
+                match self.micro_steps(pos, x, y) {
+                    Some(q) => {
+                        pos = q;
+                        continue;
+                    }
+                    None => return Step::Blocked,
+                }
             }
             let fe = fw.endpos;
             let dn = self.tr(fe, [fe[0], fe[1], fe[2] - (STEP + SUBSTEP + 4.0)]);
@@ -264,29 +278,147 @@ impl<'a, W: BotWorld> Builder<'a, W> {
         Step::Walk([tx, ty, pos[2]])
     }
 
+    /// Walk from `pos` to (x, y) in 4-unit steps with step-up 18; the landing position.
+    fn micro_steps(&mut self, pos: Vec3, x: f32, y: f32) -> Option<Vec3> {
+        let total = dist2d(pos, [x, y, 0.0]);
+        let n = libm::ceilf(total / 4.0).max(1.0) as i32;
+        let mut q = pos;
+        for i in 1..=n {
+            let f = i as f32 / n as f32;
+            let (mx, my) = (pos[0] + (x - pos[0]) * f, pos[1] + (y - pos[1]) * f);
+            let up = self.tr(q, [q[0], q[1], q[2] + STEP]);
+            if up.startsolid {
+                return None;
+            }
+            let u = up.endpos;
+            let fw = self.tr(u, [mx, my, u[2]]);
+            if fw.fraction < 1.0 {
+                return None;
+            }
+            let dn = self.tr(fw.endpos, [mx, my, u[2] - STEP - 8.0]);
+            if dn.fraction >= 1.0 || dn.normal[2] < 0.7 {
+                return None;
+            }
+            q = dn.endpos;
+        }
+        Some(q)
+    }
+
+    /// A jump pad: velocity `v` is applied every frame while the box touches the trigger;
+    /// in the air the player may steer (QW air control: up to 30 u/s along the wish
+    /// direction). Tries no steering and 8 steering directions, keeps the landing that
+    /// gains the most height, then distance. Returns the landing node.
+    fn push_sim(&mut self, starts: &[Vec3], mn: Vec3, mx: Vec3, v: Vec3) -> Option<u32> {
+        let mut best: Option<(f32, Vec3)> = None;
+        for &start in starts.iter().take(3) {
+            for k in 0..9 {
+                let steer = if k == 0 { None } else { Some(yaw_dir((k - 1) as f32 * 45.0)) };
+                let Some(pos) = self.push_fly(start, mn, mx, v, steer) else { continue };
+                let gain = pos[2] - start[2];
+                let d = dist2d(pos, start);
+                if d < 48.0 && gain < STEP {
+                    continue;
+                }
+                let score = gain * 2.0 + d;
+                if best.map_or(true, |(bs, _)| score > bs) {
+                    best = Some((score, pos));
+                }
+            }
+            if best.is_some() {
+                break;
+            }
+        }
+        let (_, pos) = best?;
+        let (cx, cy) = Self::col(pos[0], pos[1]);
+        for (x, y) in [(cx as f32 * GRID, cy as f32 * GRID), (pos[0], pos[1])] {
+            if let Some(l) = self.floor(x, y, pos[2] + STEP, STEP + 40.0) {
+                if let Some(n) = self.node_at([x, y, l[2]]) {
+                    return Some(n);
+                }
+            }
+        }
+        None
+    }
+
+    fn push_fly(&mut self, start: Vec3, mn: Vec3, mx: Vec3, v: Vec3, steer: Option<Vec3>) -> Option<Vec3> {
+        let mut pos = start;
+        let mut vel = v;
+        let dt = 1.0 / 40.0;
+        let mut left = false;
+        for _ in 0..200 {
+            let inside = (0..3).all(|k| pos[k] + PLAYER_MAXS[k] >= mn[k] && pos[k] + PLAYER_MINS[k] <= mx[k]);
+            if inside {
+                vel = v;
+            } else {
+                left = true;
+                if let Some(d) = steer {
+                    let along = dot(vel, d);
+                    if along < 30.0 {
+                        vel = ma(vel, (30.0 - along).min(10.0 * 320.0 * dt), d);
+                    }
+                }
+            }
+            let mut time_left = dt;
+            for _ in 0..4 {
+                let t = self.tr(pos, ma(pos, time_left, vel));
+                if t.startsolid || t.allsolid {
+                    return None;
+                }
+                pos = t.endpos;
+                if t.fraction >= 1.0 {
+                    break;
+                }
+                if t.normal[2] >= 0.7 && vel[2] <= 0.0 && left {
+                    return Some(pos);
+                }
+                let back = dot(vel, t.normal);
+                vel = sub(vel, scale(t.normal, back));
+                time_left *= 1.0 - t.fraction;
+            }
+            vel[2] -= 800.0 * dt;
+            if pos[2] < start[2] - DROP_MAX {
+                return None;
+            }
+        }
+        None
+    }
+
     /// Simulated running jump from p along unit direction d. Returns the landing node.
     fn jump(&mut self, from: u32, d: Vec3) -> Option<(u32, Vec3)> {
         let p = self.nodes[from as usize];
         let mut pos = p;
-        let mut vel = [d[0] * 300.0, d[1] * 300.0, 270.0];
+        let mut vel = [d[0] * 280.0, d[1] * 280.0, 270.0];
         let dt = 1.0 / 30.0;
+        let mut landed = false;
         for _ in 0..40 {
-            let end = ma(pos, dt, vel);
-            let t = self.tr(pos, end);
-            if t.startsolid || t.allsolid {
-                return None;
-            }
-            pos = t.endpos;
-            if t.fraction < 1.0 {
-                if t.normal[2] >= 0.7 && vel[2] <= 0.0 {
-                    break;
-                }
-                // slide along walls / ceilings like FlyMove
-                let back = dot(vel, t.normal);
-                vel = sub(vel, scale(t.normal, back));
-                if len2d(vel) < 50.0 && vel[2] <= 0.0 {
+            // one FlyMove-like step: up to 4 bumps, sliding along what we hit
+            let mut time_left = dt;
+            for _ in 0..4 {
+                let end = ma(pos, time_left, vel);
+                let t = self.tr(pos, end);
+                if t.startsolid || t.allsolid {
                     return None;
                 }
+                pos = t.endpos;
+                if t.fraction >= 1.0 {
+                    break;
+                }
+                if t.normal[2] >= 0.7 && vel[2] <= 0.0 {
+                    landed = true;
+                    break;
+                }
+                let back = dot(vel, t.normal);
+                vel = sub(vel, scale(t.normal, back));
+                time_left *= 1.0 - t.fraction;
+            }
+            if landed {
+                break;
+            }
+            // air control: holding forward keeps ~30 u/s along the jump direction (pmove
+            // PM_AirAccelerate caps wishspeed at 30), which is how one climbs a ledge
+            let along = dot(vel, d);
+            if along < 30.0 {
+                vel = ma(vel, 30.0 - along, d);
             }
             vel[2] -= 800.0 * dt;
             if pos[2] < p[2] - DROP_MAX {
@@ -298,7 +430,8 @@ impl<'a, W: BotWorld> Builder<'a, W> {
             return None;
         }
         let along = dot(sub(pos, p), d);
-        if along < GRID * 0.9 {
+        let climbed = pos[2] > p[2] + STEP;
+        if along < if climbed { 4.0 } else { GRID * 0.9 } {
             return None;
         }
         let (cx, cy) = Self::col(pos[0], pos[1]);
@@ -410,22 +543,13 @@ fn classify(classname: &[u8], spawnflags: u32) -> Option<GoalKind> {
 
 impl NavGraph {
     /// Build the graph of the current map (call after the map's entities spawned).
-    pub fn build<W: BotWorld>(w: &W) -> NavGraph {
-        let mut b = Builder {
-            w,
-            traces: 0,
-            nodes: Vec::new(),
-            flags: Vec::new(),
-            columns: BTreeMap::new(),
-            links: Vec::new(),
-            linked: BTreeMap::new(),
-            queue: VecDeque::new(),
-        };
+    pub fn build<W: BotWorld>(w: &mut W) -> NavGraph {
         // collect entities of interest
         let mut goal_ents: Vec<(u32, GoalKind, Vec3)> = Vec::new();
         let mut teleports: Vec<(Vec3, Vec3, Vec<u8>)> = Vec::new();
         let mut dests: Vec<(Vec<u8>, Vec3)> = Vec::new();
         let mut plats: Vec<(Vec3, Vec3)> = Vec::new();
+        let mut pushes: Vec<(Vec3, Vec3, Vec3)> = Vec::new(); // absmin, absmax, push velocity
         let mut seeds: Vec<Vec3> = Vec::new();
         for e in 1..w.num_edicts() {
             let Some(ent) = w.entity(e) else { continue };
@@ -439,11 +563,26 @@ impl NavGraph {
                 teleports.push((ent.absmin, ent.absmax, ent.target.to_vec()));
             } else if ent.classname == b"func_plat" {
                 plats.push((ent.absmin, ent.absmax));
+            } else if ent.classname == b"trigger_push" {
+                let sp = if ent.speed > 0.0 { ent.speed } else { 1000.0 };
+                let v = scale(ent.movedir, sp * 10.0);
+                let v = [v[0].clamp(-2000.0, 2000.0), v[1].clamp(-2000.0, 2000.0), v[2].clamp(-2000.0, 2000.0)];
+                pushes.push((ent.absmin, ent.absmax, v));
             }
             if !ent.targetname.is_empty() && ent.classname != b"trigger_teleport" {
                 dests.push((ent.targetname.to_vec(), ent.origin));
             }
         }
+        let mut b = Builder {
+            w,
+            traces: 0,
+            nodes: Vec::new(),
+            flags: Vec::new(),
+            columns: BTreeMap::new(),
+            links: Vec::new(),
+            linked: BTreeMap::new(),
+            queue: VecDeque::new(),
+        };
         for s in &seeds {
             b.seed(*s);
         }
@@ -454,26 +593,51 @@ impl NavGraph {
                 tele_links.push((*mn, *mx, *d));
             }
         }
-        // flood fill
-        while let Some(n) = b.queue.pop_front() {
-            b.expand(n);
-        }
-        // teleporters: every node whose box touches the trigger (grown by 24) → destination node
-        for (mn, mx, d) in &tele_links {
-            let dest = match b.seed(*d) {
-                Some(x) => x,
-                None => continue,
-            };
+        // flood fill, then teleporters and jump pads (which seed new areas), a few passes
+        for _pass in 0..4 {
             while let Some(n) = b.queue.pop_front() {
                 b.expand(n);
             }
-            let center = scale(add(*mn, *mx), 0.5);
-            for n in 0..b.nodes.len() as u32 {
-                let p = b.nodes[n as usize];
-                let inside = (0..3).all(|k| p[k] + PLAYER_MAXS[k] + 24.0 >= mn[k] && p[k] + PLAYER_MINS[k] - 24.0 <= mx[k]);
-                if inside && n != dest {
-                    b.add_link(n, dest, LinkKind::Teleport, center);
+            // teleporters: every node whose box touches the trigger (grown by 24) → destination
+            for (mn, mx, d) in &tele_links {
+                let Some(dest) = b.seed(*d) else { continue };
+                let center = scale(add(*mn, *mx), 0.5);
+                for n in 0..b.nodes.len() as u32 {
+                    let p = b.nodes[n as usize];
+                    let inside = (0..3).all(|k| p[k] + PLAYER_MAXS[k] + 24.0 >= mn[k] && p[k] + PLAYER_MINS[k] - 24.0 <= mx[k]);
+                    if inside && n != dest {
+                        b.add_link(n, dest, LinkKind::Teleport, center);
+                    }
                 }
+            }
+            // jump pads: simulate the push from the nodes touching the trigger
+            for (mn, mx, v) in &pushes {
+                let center = scale(add(*mn, *mx), 0.5);
+                let touching: Vec<u32> = (0..b.nodes.len() as u32)
+                    .filter(|&n| {
+                        let p = b.nodes[n as usize];
+                        (0..3).all(|k| p[k] + PLAYER_MAXS[k] + 8.0 >= mn[k] && p[k] + PLAYER_MINS[k] - 8.0 <= mx[k])
+                    })
+                    .collect();
+                let mut starts: Vec<(i32, Vec3)> = Vec::new();
+                for &n in &touching {
+                    let p = b.nodes[n as usize];
+                    let c = [center[0].clamp(p[0] - 32.0, p[0] + 32.0), center[1].clamp(p[1] - 32.0, p[1] + 32.0), p[2]];
+                    starts.push((-(p[2] as i32) * 1024 + dist2d(c, center) as i32, c));
+                    starts.push((-(p[2] as i32) * 1024 + 512 + dist2d(p, center) as i32, p));
+                }
+                starts.sort_by(|a, c| a.0.cmp(&c.0));
+                let starts: Vec<Vec3> = starts.into_iter().map(|x| x.1).collect();
+                if let Some(dest) = b.push_sim(&starts, *mn, *mx, *v) {
+                    for &n in &touching {
+                        if n != dest {
+                            b.add_link(n, dest, LinkKind::Push, center);
+                        }
+                    }
+                }
+            }
+            if b.queue.is_empty() {
+                break;
             }
         }
         // plats: lowest nodes in the footprint → nodes around the top
@@ -501,7 +665,43 @@ impl NavGraph {
             }
         }
 
+        // Standing inside a teleporter or a jump pad means being moved: such nodes keep
+        // only their Teleport / Push links (walking across a pad launches you).
+        let overlaps = |p: Vec3, mn: &Vec3, mx: &Vec3| (0..3).all(|k| p[k] + PLAYER_MAXS[k] > mn[k] && p[k] + PLAYER_MINS[k] < mx[k]);
+        let mut forced_kind: Vec<Option<LinkKind>> = vec![None; b.nodes.len()];
+        for (i, p) in b.nodes.iter().enumerate() {
+            if pushes.iter().any(|(mn, mx, _)| overlaps(*p, mn, mx)) {
+                forced_kind[i] = Some(LinkKind::Push);
+            } else if tele_links.iter().any(|(mn, mx, _)| overlaps(*p, mn, mx)) {
+                forced_kind[i] = Some(LinkKind::Teleport);
+            }
+        }
+        let mut has_kind = vec![false; b.nodes.len()];
+        for l in &b.links {
+            if forced_kind[l.from as usize] == Some(l.kind) {
+                has_kind[l.from as usize] = true;
+            }
+        }
+        b.links.retain(|l| match forced_kind[l.from as usize] {
+            Some(k) if has_kind[l.from as usize] => l.kind == k,
+            _ => true,
+        });
+
+        // brushing past a teleporter / jump pad is risky: walking next to one costs extra
+        let near = |p: Vec3, mn: &Vec3, mx: &Vec3| (0..3).all(|k| p[k] + PLAYER_MAXS[k] + 16.0 > mn[k] && p[k] + PLAYER_MINS[k] - 16.0 < mx[k]);
+        let risky: Vec<bool> = b
+            .nodes
+            .iter()
+            .map(|p| pushes.iter().any(|(mn, mx, _)| near(*p, mn, mx)) || tele_links.iter().any(|(mn, mx, _)| near(*p, mn, mx)))
+            .collect();
+        for l in b.links.iter_mut() {
+            if risky[l.to as usize] && l.kind != LinkKind::Teleport && l.kind != LinkKind::Push && forced_kind[l.to as usize].is_none() {
+                l.cost += 300.0;
+            }
+        }
+
         // CSR adjacency (links sorted by (from, to) for stable order)
+        let build_traces = b.traces;
         let nn = b.nodes.len();
         let mut links = std::mem::take(&mut b.links);
         links.sort_by(|a, c| (a.from, a.to).cmp(&(c.from, c.to)));
@@ -570,6 +770,7 @@ impl NavGraph {
             fill[c] += 1;
         }
 
+        drop(b);
         let mut g = NavGraph {
             nodes,
             links,
@@ -581,6 +782,7 @@ impl NavGraph {
             cell_nodes,
             goals: Vec::new(),
             fields: Vec::new(),
+            landmarks: Vec::new(),
             stats: NavStats::default(),
         };
 
@@ -596,12 +798,30 @@ impl NavGraph {
             g.dijkstra_into(goal.node, &mut fields[gi * nn..(gi + 1) * nn]);
         }
         g.fields = fields;
+        // landmarks: farthest-point sampling over goal positions (deterministic)
+        if !g.goals.is_empty() {
+            let mut lm = vec![0usize];
+            while lm.len() < 8.min(g.goals.len()) {
+                let mut best = (0.0f32, 0usize);
+                for (i, gl) in g.goals.iter().enumerate() {
+                    let d = lm.iter().map(|&j| dist(gl.pos, g.goals[j].pos)).fold(f32::MAX, f32::min);
+                    if d > best.0 {
+                        best = (d, i);
+                    }
+                }
+                if best.0 <= 0.0 {
+                    break;
+                }
+                lm.push(best.1);
+            }
+            g.landmarks = lm;
+        }
 
         let mut st = NavStats {
             nodes: nn as u32,
             links: g.links.len() as u32,
             goals: g.goals.len() as u32,
-            build_traces: b.traces,
+            build_traces,
             ..Default::default()
         };
         for l in &g.links {
@@ -611,6 +831,7 @@ impl NavGraph {
                 LinkKind::Drop => st.drop += 1,
                 LinkKind::Teleport => st.teleport += 1,
                 LinkKind::Plat => st.plat += 1,
+                LinkKind::Push => st.push += 1,
             }
         }
         g.stats = st;
@@ -642,6 +863,25 @@ impl NavGraph {
         for (o, d) in out.iter_mut().zip(dist.iter()) {
             *o = if d.is_finite() { ((d / FIELD_Q) as u32).min(FIELD_INF as u32 - 1) as u16 } else { FIELD_INF };
         }
+    }
+
+    /// A* heuristic from `n` to `t`: max of the straight distance and the ALT bound
+    /// from the landmark distance fields (d(n,t) >= d(n,L) - d(t,L)).
+    pub fn heuristic(&self, n: u32, t: u32) -> f32 {
+        let nn = self.nodes.len();
+        let (Some(a), Some(b)) = (self.nodes.get(n as usize), self.nodes.get(t as usize)) else { return 0.0 };
+        let mut h = dist(a.pos, b.pos);
+        for &l in &self.landmarks {
+            let f = &self.fields[l * nn..(l + 1) * nn];
+            let (dn, dt) = (f[n as usize], f[t as usize]);
+            if dn != FIELD_INF && dt != FIELD_INF && dn > dt {
+                let v = (dn - dt) as f32 * FIELD_Q - FIELD_Q;
+                if v > h {
+                    h = v;
+                }
+            }
+        }
+        h
     }
 
     pub fn stats(&self) -> NavStats {
@@ -728,7 +968,7 @@ impl NavGraph {
     }
 
     /// Nearest node that a point trace from `p` reaches (up to 8 candidates tried).
-    pub fn nearest_visible<W: BotWorld>(&self, w: &W, p: Vec3, radius: f32) -> Option<u32> {
+    pub fn nearest_visible<W: BotWorld>(&self, w: &mut W, p: Vec3, radius: f32) -> Option<u32> {
         let cx = libm::floorf((p[0] - self.grid_org[0]) / CELL) as i32;
         let cy = libm::floorf((p[1] - self.grid_org[1]) / CELL) as i32;
         let r = (radius / CELL) as i32 + 1;

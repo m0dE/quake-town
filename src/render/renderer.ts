@@ -18,7 +18,7 @@ import { BrushSet } from './brushset';
 import { DL_COLORS, DL_LIGHT_COLORS, Dlights, MAX_BEAMS, MAX_DLIGHT_SLOTS, MAX_EXPLOSIONS, Particles, TempEnts, PT_EXPLODE, PT_EXPLODE2, PT_FIRE, PT_BLOB, PT_BLOB2 } from './effects';
 import { MF_GIB, MF_GRENADE, MF_ROCKET, MF_ROTATE, MF_TRACER, MF_TRACER2, MF_TRACER3, MF_ZOMGIB, loadMdl, loadSpr, mdlPose, mdlSkinImage, type Spr } from './mdl';
 import { Palette } from './palette';
-import { PostFX } from './post';
+import { PostFX, type PostOptions } from './post';
 import { GLOW_FS, MAX_DLIGHTS, PARTICLE_FS, PARTICLE_VS, SPRITE_FS, SPRITE_VS } from './shaders';
 import { applyFilter, rgbaTexture } from './textures';
 import {
@@ -77,7 +77,7 @@ class SpriteBatch {
     this.color[o] = r; this.color[o + 1] = g; this.color[o + 2] = b; this.color[o + 3] = a;
   }
   commit(): void {
-    for (const a of this.attrs) { a.clearUpdateRanges(); a.addUpdateRange(0, this.count * 4); a.needsUpdate = true; }
+    for (let i = 0; i < this.attrs.length; i++) { const a = this.attrs[i]; a.clearUpdateRanges(); a.addUpdateRange(0, this.count * 4); a.needsUpdate = true; }
     this.geo.instanceCount = this.count;
     this.mesh.visible = this.count > 0;
   }
@@ -92,6 +92,8 @@ interface MapState {
   subMeshes: (THREE.Mesh | null)[];
   subDrawn: Uint8Array;
   fog: THREE.Vector4;
+  /** worldspawn wateralpha / _wateralpha: the map was vis'd for translucent water (value), else -1 */
+  waterAlpha: number;
 }
 
 export class Renderer {
@@ -108,6 +110,9 @@ export class Renderer {
   private aliasShared = new AliasShared();
   private map: MapState | null = null;
   private models = new Map<string, ModelEntry>();
+  /** the sprite and BSP-item entries of `models`, for allocation-free per-frame loops */
+  private spriteList: { spr: Spr; batch: SpriteBatch }[] = [];
+  private bspList: { set: BrushSet; meshes: THREE.Mesh[]; used: number }[] = [];
   private particles = new Particles(MAX_PARTICLES);
   private dl = new Dlights();
   private tents = new TempEnts();
@@ -125,7 +130,7 @@ export class Renderer {
     uNumDl: { value: 0 },
     uDlPos: { value: Array.from({ length: MAX_DLIGHTS }, () => new THREE.Vector4()) },
     uDlCol: { value: Array.from({ length: MAX_DLIGHTS }, () => new THREE.Vector4()) },
-    uFog: { value: new THREE.Vector4() },
+    uFog: { value: new THREE.Vector4(0, 0, 0, 0) },
     uOverbright: { value: 2 },
     uFullbright: { value: 0 },
     uEmissive: { value: 0 },
@@ -265,7 +270,7 @@ export class Renderer {
       subMeshes.push(sm);
     }
     // worldspawn fog ("density r g b")
-    const fog = new THREE.Vector4();
+    const fog = new THREE.Vector4(0, 0, 0, 0);
     const ents = parseEntities(bsp.entities);
     const ws = ents.find((e) => e.classname === 'worldspawn');
     if (ws?.fog) {
@@ -273,7 +278,11 @@ export class Renderer {
       if (v.length >= 4 && v[0] > 0) fog.set(v[1], v[2], v[3], v[0] / 64);
       else if (v.length >= 2 && v[0] > 0) fog.set(v[1], v[1], v[1], v[0] / 64);
     }
-    this.map = { name: path, set, worldGeo: g, worldMesh: mesh, groups, subMeshes, subDrawn: new Uint8Array(bsp.models.length), fog };
+    const wa = ws ? parseFloat(ws.wateralpha ?? ws._wateralpha ?? '') : NaN;
+    this.map = {
+      name: path, set, worldGeo: g, worldMesh: mesh, groups, subMeshes, subDrawn: new Uint8Array(bsp.models.length), fog,
+      waterAlpha: wa > 0 && wa < 1 ? wa : -1,
+    };
     this.particles.clear();
     this.dl.clear();
     this.tents.clear();
@@ -314,6 +323,8 @@ export class Renderer {
       if (e.kind === 'sprite') { e.batch.geo.dispose(); (e.batch.mesh.material as THREE.RawShaderMaterial).uniforms.uAtlas.value?.dispose(); }
     }
     this.models.clear();
+    this.spriteList.length = 0;
+    this.bspList.length = 0;
     this.post.dispose();
     this.aliasShared.dispose();
     this.gl.dispose();
@@ -382,7 +393,7 @@ export class Renderer {
       idx.clearUpdateRanges();
       idx.addUpdateRange(0, g.stats.indices);
       idx.needsUpdate = true;
-      map.set.update(time, S.waterAlpha, S.bloom);
+      map.set.update(time, this.waterAlpha(), S.bloom);
     }
 
     // events → effects
@@ -391,10 +402,8 @@ export class Renderer {
     // entities
     const ents = f.entities;
     this.nOpaque = 0; this.nTrans = 0;
-    for (const e of this.models.values()) {
-      if (e.kind === 'sprite') e.batch.count = 0;
-      else if (e.kind === 'bspmodel') { e.used = 0; e.set.update(time, S.waterAlpha, S.bloom); }
-    }
+    for (let i = 0; i < this.spriteList.length; i++) this.spriteList[i].batch.count = 0;
+    for (let i = 0; i < this.bspList.length; i++) { const e = this.bspList[i]; e.used = 0; e.set.update(time, S.waterAlpha, S.bloom); }
     if (map) map.subDrawn.fill(0);
     const stamp = this.frameNo;
     for (let i = 0; i < f.entityCount; i++) {
@@ -416,15 +425,15 @@ export class Renderer {
     this.su.uSkyEmissive.value = S.bloom ? 0.15 : 0;
     this.su.uFlat.value.x = S.drawflat ? 1 : 0;
     this.su.uWarpLight.value = 1;
-    this.su.uAlpha.value = S.waterAlpha;
+    this.su.uAlpha.value = this.waterAlpha();
     if (map) this.su.uFog.value.copy(map.fog); else this.su.uFog.value.set(0, 0, 0, 0);
 
     // particles
     this.fillParticles(S.particles === 'modern');
     // sprites commit
-    for (const e of this.models.values()) if (e.kind === 'sprite') { this.setSpriteAxes(e.batch, e.spr.type); e.batch.commit(); }
+    for (let i = 0; i < this.spriteList.length; i++) { const e = this.spriteList[i]; this.setSpriteAxes(e.batch, e.spr.type); e.batch.commit(); }
     this.glow.commit();
-    for (const e of this.models.values()) if (e.kind === 'bspmodel') for (let i = e.used; i < e.meshes.length; i++) e.meshes[i].visible = false;
+    for (let k = 0; k < this.bspList.length; k++) { const e = this.bspList[k]; for (let i = e.used; i < e.meshes.length; i++) e.meshes[i].visible = false; }
     for (let i = this.nOpaque; i < this.aliasOpaque.length; i++) this.aliasOpaque[i].mesh.visible = false;
     for (let i = this.nTrans; i < this.aliasTrans.length; i++) this.aliasTrans[i].mesh.visible = false;
     if (map) for (let m = 1; m < map.subMeshes.length; m++) { const sm = map.subMeshes[m]; if (sm) sm.visible = map.subDrawn[m] === 1; }
@@ -458,12 +467,19 @@ export class Renderer {
     }
     if (usePost) {
       const warp = S.waterWarp && contents <= CONTENTS_WATER && contents >= CONTENTS_LAVA ? 1 : 0;
-      this.post.finish(gl, {
-        bloom: S.bloom, bloomStrength: S.bloomStrength, aces: S.toneMapping === 'aces', exposure: S.exposure, gamma: S.gamma,
-        ssao: S.ssao, fxaa: S.fxaa, msaa: S.msaa,
-      }, bl, warp, time, this.camera);
+      const po = this.postOpts;
+      po.bloom = S.bloom; po.bloomStrength = S.bloomStrength; po.aces = S.toneMapping === 'aces'; po.exposure = S.exposure;
+      po.gamma = S.gamma; po.ssao = S.ssao; po.fxaa = S.fxaa; po.msaa = S.msaa;
+      this.post.finish(gl, po, bl, warp, time, this.camera);
     } else {
       this.post.drawBlend(gl, bl);
+      // the scene shaders write a bloom weight into alpha; make the canvas opaque again
+      const ctx = gl.getContext();
+      ctx.colorMask(false, false, false, true);
+      ctx.clearColor(0, 0, 0, 1);
+      ctx.clear(ctx.COLOR_BUFFER_BIT);
+      ctx.colorMask(true, true, true, true);
+      ctx.clearColor(0, 0, 0, 0);
     }
 
     const st = this.lastStats;
@@ -478,6 +494,17 @@ export class Renderer {
     st.dlights = this.su.uNumDl.value;
   }
   private tmpSize = new THREE.Vector2();
+  private postOpts: PostOptions = { bloom: false, bloomStrength: 0, aces: false, exposure: 1, gamma: 1, ssao: false, fxaa: false, msaa: 0 };
+
+  /**
+   * r_wateralpha: only on maps whose worldspawn says they were vis'd for translucent water
+   * (otherwise the void under the surface would show); the map's own value wins.
+   */
+  private waterAlpha(): number {
+    const S = this.settings;
+    if (S.waterAlpha >= 1 || !this.map || this.map.waterAlpha < 0) return 1;
+    return this.map.waterAlpha;
+  }
 
   // ------------------------------------------------------------------------------------ internals
 
@@ -521,6 +548,7 @@ export class Renderer {
           e = { kind: 'alias', model };
         }
       } else if (name.endsWith('.bsp')) {
+        if (this.map && name === this.map.name) return e; // the world itself (modelindex 1): never an entity
         const d = this.vfs.get(name);
         if (d) {
           const set = new BrushSet(loadBsp(d, this.vfs.get(name.replace(/\.bsp$/i, '.lit'))), this.pal, this.su);
@@ -536,6 +564,8 @@ export class Renderer {
       e = { kind: 'none' };
     }
     this.models.set(name, e);
+    if (e.kind === 'sprite') this.spriteList.push(e);
+    if (e.kind === 'bspmodel') this.bspList.push(e);
     return e;
   }
 
@@ -769,9 +799,9 @@ export class Renderer {
       (mat.uniforms.uShell.value as THREE.Vector3).set(0, 0, 0);
     } else {
       const mx = Math.max(L[0], L[1], L[2], 1);
-      const lvl = Math.min(mx, 200) / 128;
+      const lvl = Math.min(mx, 192) / 128;
       lc.set(L[0] / mx * lvl, L[1] / mx * lvl, L[2] / mx * lvl);
-      lu.set(0.85, 0.55, 0, full);
+      lu.set(1.0, 0.7, 0, full);
       mat.uniforms.uModern.value = 1;
       mat.uniforms.uRim.value = isGun ? 0.15 : 0.35;
       // key light from above, towards the camera side
@@ -886,7 +916,8 @@ export class Renderer {
         x += dx * 30; y += dy * 30; z += dz * 30;
         d -= 30;
       }
-      // the bolt lights its surroundings a little (modern) — QW had none
+      // modern: the bolt lights its impact point (QW had no beam light)
+      if (this.settings.bloom) this.dl.set(-1 - b, T.beamStop[b * 3], T.beamStop[b * 3 + 1], T.beamStop[b * 3 + 2], 160 + Math.random() * 40, 0.1, 4);
     }
     for (let k = 0; k < MAX_EXPLOSIONS; k++) {
       const m = T.exModel[k];
@@ -916,7 +947,7 @@ export class Renderer {
       pos[o + 3] = s;
       col[o] = pal[c * 3] * k; col[o + 1] = pal[c * 3 + 1] * k; col[o + 2] = pal[c * 3 + 2] * k; col[o + 3] = a;
     }
-    for (const a of this.partAttrs) { a.clearUpdateRanges(); a.addUpdateRange(0, n * 4); a.needsUpdate = true; }
+    for (let i = 0; i < this.partAttrs.length; i++) { const a = this.partAttrs[i]; a.clearUpdateRanges(); a.addUpdateRange(0, n * 4); a.needsUpdate = true; }
     this.partGeo.instanceCount = n;
     this.partMesh.visible = n > 0;
     const u = this.partMat.uniforms;

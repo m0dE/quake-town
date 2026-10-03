@@ -111,11 +111,15 @@ impl Server {
         
         {
             let c = &mut self.clients[slot];
-            let bot = c.bot.clone();
             *c = Client::new();
-            c.bot = bot;
             c.state = state;
             c.userinfo = userinfo;
+        }
+        if state == CS_BOT {
+            let sk = crate::bots::bot_skill(self, slot);
+            self.botsys.add(slot, sk);
+        } else {
+            self.botsys.remove(slot);
         }
         self.extract_from_userinfo(vm, slot)?;
 
@@ -189,9 +193,8 @@ impl Server {
             }
         }
         vm.set_e_f(e, fld::FRAGS, 0.0);
-        let bot = self.clients[slot].bot.clone();
         self.clients[slot] = Client::new();
-        self.clients[slot].bot = bot;
+        self.botsys.remove(slot);
         Ok(())
     }
 

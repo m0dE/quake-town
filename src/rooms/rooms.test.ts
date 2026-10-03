@@ -132,8 +132,9 @@ await test('listing: standing rows for every region × mode with maps, real coun
     { id: 'na-1-freedm', clientCount: 9, authorityNodeId: 'n', createdAt: '' },
   ]));
   const standing = rows.filter((r) => r.config.standing);
-  // ctf has no maps in the static table and no index → not listed
-  assert.equal(standing.filter((r) => r.standingIndex === 1).length, REGIONS.length * (MODE_ORDER.length - 1));
+  // every region × mode has a standing server, CTF included (qt_fort + lqdm maps)
+  assert.equal(standing.filter((r) => r.standingIndex === 1).length, REGIONS.length * MODE_ORDER.length);
+  assert.equal(rows.find((r) => r.config.name === 'EU CTF 1')!.config.rotation[0], 'qt_fort');
   const eu = rows.find((r) => r.roomId === ffaEu)!;
   assert.equal(eu.humans, 14);
   assert.equal(eu.bots, 2);
@@ -149,11 +150,17 @@ await test('listing: standing rows for every region × mode with maps, real coun
   assert.equal(botsEstimate(duel.config, 1), 0);
 });
 
-await test('ctf standing rooms come from the index', () => {
-  const index = [{ id: 'x', name: 'maps-qt', kind: 'maps', bytes: 1, maps: [{ name: 'qt_ctf1', modes: ['ctf'] }, { name: 'qt_aero', modes: ['ffa'] }] }];
-  assert.deepEqual(officialRotation('ctf', index), ['qt_ctf1']);
-  const rows = withStanding([], index);
-  assert.equal(rows.filter((r) => r.config.mode === 'ctf').length, REGIONS.length);
+await test('official rotations use the original maps; dictionary codes are append-only', () => {
+  assert.equal(officialRotation('ctf')[0], 'qt_fort');
+  assert.equal(officialRotation('4on4')[0], 'qt_fort');
+  assert.ok(officialRotation('duel').includes('qt_tower'));
+  assert.ok(officialRotation('2on2').includes('qt_tower'));
+  assert.equal(MAP_DICT.indexOf('qt_aero'), 13);
+  assert.equal(MAP_DICT.indexOf('qt_tower'), 22);
+  assert.equal(MAP_DICT.indexOf('qt_fort'), 23);
+  const id = encodeRoomId(standingConfig('eu', 'ctf', 1)!);
+  assert.ok(id.length < 60, id);
+  assert.deepEqual(decodeRoomId(id)!.rotation, officialRotation('ctf'));
 });
 
 await test('quick play prefers the busiest open public room', () => {

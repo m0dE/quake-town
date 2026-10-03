@@ -25,6 +25,9 @@ import { connectLoopback } from './loopback.js';
 import { ticksPerFrameFor, TICRATE, type QtApp, type QtState } from '../sim/qtsim.js';
 import { isSimInput } from '../sim/wire.js';
 
+/** Hash (and so vote on) every Nth frame. Must be the same on every client of a room. */
+export const HASH_EVERY = 4;
+
 export type AppMessageHandler = (player: string | null, data: unknown) => void;
 
 export interface SessionOptions {
@@ -87,7 +90,8 @@ export class NetSession {
 
   constructor(opts: SessionOptions) {
     this.opts = opts;
-    this.roomId = `${opts.room}-${opts.app.name}`;
+    // A Quake Town room id already ends in `-quaketown` (DESIGN "Room config"); a bare name gets it.
+    this.roomId = opts.room.endsWith(`-${opts.app.name}`) ? opts.room : `${opts.room}-${opts.app.name}`;
     this.lockstep = new lockstep.Lockstep<QtState, unknown>({
       sim: opts.app,
       player: opts.playerId,
@@ -95,6 +99,9 @@ export class NetSession {
       predict: opts.predict ?? true,
       fps: TICRATE,
       snapshotEvery: opts.snapshotEvery,
+      // world_hash walks the whole world (~0.6-0.8 ms, as much as a tick): every 4th frame
+      // is 19 verdicts a second at 77 Hz, a desync is still seen within 52 ms.
+      hashEvery: HASH_EVERY,
       dial: (events, hints) => this.dial(events, hints),
       inputSource: (ctx) => opts.makeInput(ctx),
       onConfirmedTick: (s, f) => opts.onConfirmedTick(s, f),

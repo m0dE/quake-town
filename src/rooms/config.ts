@@ -75,6 +75,7 @@ export const MAP_DICT: readonly string[] = [
   'lqdm1', 'lqdm2', 'lqdm3', 'lqdm4', 'lqdm5', 'lqdm6', 'lqdm7', 'lqdm8', 'lqdm9', 'lqdm10',
   'lqdm11', 'lqdm12', 'lqdm13',
   'qt_aero', 'qt_dm1', 'qt_dm2', 'qt_dm3', 'qt_dm4', 'qt_dm5', 'qt_dm6', 'qt_ctf1', 'qt_ctf2',
+  'qt_tower', 'qt_fort',
 ];
 
 const MAP_NAME = /^[a-z0-9_-]{1,32}$/;

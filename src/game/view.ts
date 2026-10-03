@@ -102,7 +102,8 @@ export class ViewCalc {
    */
   calc(cam: RenderCamera, pose: SelfPose, angles: ArrayLike<number>, selfTime: number, spectator: boolean): number {
     let dt = this.lastSelfTime < 0 ? 0 : selfTime - this.lastSelfTime;
-    if (dt < 0 || dt > 0.25) dt = 0;    // a reseat or a seek: no tint/kick decay jump
+    if (dt < 0) dt = 0;                 // a seek back
+    else if (dt > 0.25) dt = 0.25;      // a reseat or a starved page: decay, but not all at once
     this.lastSelfTime = selfTime;
     const c = this.cvars;
     const o = cam.origin, a = cam.angles;
@@ -171,9 +172,6 @@ export class ViewCalc {
     this.calcBlend();
     return bob;
   }
-
-  /** The stair offset applied to the camera this frame (the gun takes it too). */
-  get stepOffset(): number { return 0; }
 
   private calcRoll(angles: ArrayLike<number>, vel: ArrayLike<number>): number {
     angleVectors(angles, this.fwd, this.right, this.up);

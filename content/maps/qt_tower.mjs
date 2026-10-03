@@ -5,7 +5,7 @@
 // room (SNG) form one loop, the east room (LG) and the south-east room (MH) the other.
 // Copyright (C) 2026 Quake Town contributors. GPL-2.0-or-later.
 import { MapBuilder } from './lib/mapgen.mjs';
-import { pillar, lamp, jumpPad, lift, surfaceLight, frustum } from './lib/kit.mjs';
+import { pillar, lamp, jumpPad, lift, surfaceLight, frustum, fill } from './lib/kit.mjs';
 
 export const info = {
   name: 'qt_tower', title: 'Dark Spire', author: 'Quake Town',
@@ -25,11 +25,14 @@ const TX = {
   stairTop: 'med_csl_stp1', stairSide: 'met_brn_trim16', metal: 'met_brn_flat',
 };
 
+/** renderer screenshot cameras: [x, y, eyeZ, pitch, yaw] */
+export const shots = [[-200, -300, 46, -8, 60], [300, -300, 238, 10, 135], [0, 600, 430, 20, 270], [-900, -500, 46, -2, 45], [-800, 700, 238, 10, 300], [800, -200, 238, 0, 90], [700, -900, 46, 0, 120]];
+
 export function build() {
   const m = new MapBuilder({
     message: 'Dark Spire',
     wads: ['lq_metal.wad', 'lq_medieval.wad', 'lq_tech.wad', 'lq_liquidsky.wad', 'lq_utility.wad'],
-    worldspawn: { _sunlight: '180', _sun_mangle: '60 -70 0', _sunlight_color: '1 0.7 0.45', _sunlight2: '60', _sunlight2_color: '1 0.6 0.4', _minlight: '12', _bounce: '1', _dirt: '1', _dirtscale: '1.5', sounds: '0' },
+    worldspawn: { _sunlight: '180', _sun_mangle: '60 -70 0', _sunlight_color: '1 0.7 0.45', _sunlight2: '60', _sunlight2_color: '1 0.6 0.4', _minlight: '24', _bounce: '1', _dirt: '1', _dirtscale: '1', sounds: '0' },
   });
   m.requirements = { dmSpawns: 8, counts: { weapon_rocketlauncher: 1, weapon_lightning: 1, weapon_grenadelauncher: 1, weapon_supernailgun: 1, item_armorInv: 1, item_armor2: 1, item_artifact_super_damage: 1 } };
   surfaceLight(m, 'met_brn_lit1', 120, '1 0.75 0.45');
@@ -71,7 +74,18 @@ export function build() {
     lamp(m, [x, y, 300], { mount: dir, tex: 'met_brn_lit1', side: 'met_brn_trim16', light: 160, color: '1 0.7 0.4' });
   }
   for (const x of [-256, 0, 256]) lamp(m, [x, 376, 470], { mount: '-y', tex: 'met_brn_lit6', side: 'met_brn_trim16', light: 200, color: '1 0.35 0.2' });
-  m.item('weapon_rocketlauncher', 0, -24, 0);
+  // floor medallion under the brazier, stained-glass windows high on the atrium walls
+  m.box([-128, -128, -16, 128, 128, 2], { top: 'met_brn_rune2', side: 'met_brn_trim16' });
+  m.box([-160, -160, -16, 160, 160, 1], { top: 'met_brn_trim32s', side: 'met_brn_trim16' });
+  for (const x of [-200, 0, 200]) {
+    m.det.box([x - 32, -384, 520, x + 32, -380, 648], 'met_brn_arch2c');
+    m.det.box([x - 32, 380, 600, x + 32, 384, 728], 'met_brn_arch2c');
+  }
+  for (const y of [-200, 0, 200]) {
+    m.det.box([-384, y - 32, 520, -380, y + 32, 648], 'met_brn_arch2c');
+    m.det.box([380, y - 32, 520, 384, y + 32, 648], 'met_brn_arch2c');
+  }
+  m.item('weapon_rocketlauncher', 0, -24, 2);
   m.item('item_armorInv', -224, 320, 384);
   m.item('item_artifact_super_damage', 0, -344, 384);
   m.item('item_rockets', 300, -300, 192);
@@ -147,6 +161,16 @@ export function build() {
   m.item('item_shells', 520, -960, 0);
   m.item('item_spikes', -560, -760, 0);
   m.item('item_health', 0, -560, 0);
+
+  // ===== fill light ======================================================================
+  fill(m, [-384, -384, 384, 384], 120, { spacing: 384, light: 220, color: '1 0.8 0.6' });
+  fill(m, [-384, -384, 384, 384], 640, { spacing: 384, light: 260, color: '1 0.75 0.55' });
+  fill(m, [-384, 384, 384, 768], 540, { spacing: 384, light: 240 });
+  fill(m, [-1088, -640, -512, 320], 280, { spacing: 288, light: 230, color: '0.85 0.85 1' });
+  fill(m, [-1088, 256, -512, 832], 380, { spacing: 288, light: 230, color: '1 0.8 0.6' });
+  fill(m, [512, -320, 1088, 576], 400, { spacing: 288, light: 230, color: '0.8 0.85 1' });
+  fill(m, [-640, -832, 320, -512], 200, { spacing: 320, light: 220, color: '1 0.8 0.6' });
+  fill(m, [448, -1024, 1088, -384], 260, { spacing: 288, light: 230, color: '0.85 0.85 1' });
 
   // ===== spawns =========================================================================
   m.spawn(-200, 200, 0, 315);

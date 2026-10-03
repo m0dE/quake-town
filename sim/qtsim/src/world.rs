@@ -108,7 +108,6 @@ pub struct Client {
     pub entgravity: f32,
     pub maxspeed: f32,
     pub stats: [i32; NUM_QT_STATS],
-    pub bot: crate::bots::BotState,
     // outputs of the last tick (not hashed)
     pub out_fixangle: Option<Vec3>,
     pub out_dmg: Option<(f32, f32, Vec3)>,
@@ -127,7 +126,6 @@ impl Client {
             entgravity: 1.0,
             maxspeed: 320.0,
             stats: [0; NUM_QT_STATS],
-            bot: Default::default(),
             out_fixangle: None,
             out_dmg: None,
         }
@@ -215,6 +213,9 @@ pub struct Server {
     pub serverflags: f32,
 
     pub clients: Vec<Client>,
+    pub botsys: crate::bots::BotSys,
+    /// serverinfo when this map was spawned (keys the bots' nav graph)
+    pub spawn_info: Vec<u8>,
 
     pub areanodes: Vec<AreaNode>,
     pub links: Vec<Link>,
@@ -236,6 +237,8 @@ pub struct Server {
 
     // ---- per tick, not part of the state
     pub sink: EventSink,
+    /// events made between ticks (join, commands, userinfo): delivered with the next tick
+    pub pending: EventSink,
     pub buf_all: MsgBuf,
     pub buf_multicast: MsgBuf,
     pub buf_one: Vec<MsgBuf>,
@@ -371,16 +374,6 @@ impl Server {
         self.links[head as usize].prev = e;
     }
 
-    /// edicts in an area node list, in list order
-    fn list(&self, head: u32, out: &mut Vec<Ent>) {
-        out.clear();
-        let mut l = self.links[head as usize].next;
-        while l != head {
-            out.push(l);
-            l = self.links[l as usize].next;
-        }
-    }
-
     /// SV_LinkEdict
     pub fn link_edict(&mut self, vm: &mut Vm, e: Ent, touch_triggers: bool) -> Result<(), VmError> {
         if self.is_linked(e) {
@@ -454,10 +447,23 @@ impl Server {
     /// SV_TouchLinks. The candidates of a node are collected first and re-checked
     /// right before each call (a touch function may remove or move entities).
     fn touch_links(&mut self, vm: &mut Vm, ent: Ent, node: u32) -> Result<(), VmError> {
+        // collect the node's candidates first (a touch function may relink anything);
+        // on the stack for the common case
         let head = self.head(node, true);
-        let mut cand = Vec::new();
-        self.list(head, &mut cand);
-        for touch in cand {
+        let mut small = [0 as Ent; 32];
+        let mut n_small = 0;
+        let mut big: Vec<Ent> = Vec::new();
+        let mut l = self.links[head as usize].next;
+        while l != head {
+            if n_small < small.len() {
+                small[n_small] = l;
+                n_small += 1;
+            } else {
+                big.push(l);
+            }
+            l = self.links[l as usize].next;
+        }
+        for touch in small[..n_small].iter().copied().chain(big.into_iter()) {
             if touch == ent || vm.is_free(touch) || vm.is_free(ent) {
                 continue;
             }
@@ -565,6 +571,11 @@ impl Server {
             trace.ent = ent as i32;
         }
         trace
+    }
+
+    /// one entity's hull only (bots' static-world traces)
+    pub fn clip_world_only(&mut self, vm: &Vm, ent: Ent, start: &Vec3, mins: &Vec3, maxs: &Vec3, end: &Vec3) -> Trace {
+        self.clip_move_to_entity(vm, ent, start, mins, maxs, end)
     }
 
     /// SV_ClipToLinks

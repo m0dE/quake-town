@@ -218,7 +218,7 @@ export class Sbar {
       d.string(x + 48, y, String(s.frags).padStart(3, ' ').slice(-3));
       if (s.me) { d.char(x + 40, y, 16); d.char(x + 72, y, 17); }
       d.string(x + 88, y, String(s.stats[ST.deaths] ?? 0).padStart(4, ' '));
-      const eff = Math.round((s.stats[ST.eff] ?? 0) / 100);
+      const eff = Math.round(s.stats[ST.eff] ?? 0);
       d.string(x + 128, y, `${String(eff).padStart(3, ' ')}%`);
       let nx = x + 168;
       if (teamplay) { d.string(nx, y, s.team.slice(0, 4)); nx += 40; }
@@ -257,7 +257,7 @@ export class Sbar {
       if (y > d.h - 10) break;
       const st = s.stats;
       d.fill(x - 4, y + 2, 2, 4, Gfx.rowColor(s.top));
-      const text = `${s.name.slice(0, 16).padEnd(16, ' ')} ${String(s.frags).padStart(3, ' ')} ${String(st[ST.deaths] ?? 0).padStart(3, ' ')} ${String(Math.round((st[ST.eff] ?? 0) / 100)).padStart(3, ' ')}% ${String(st[ST.dmgGiven] ?? 0).padStart(5, ' ')} ${String(st[ST.dmgTaken] ?? 0).padStart(5, ' ')}`
+      const text = `${s.name.slice(0, 16).padEnd(16, ' ')} ${String(s.frags).padStart(3, ' ')} ${String(st[ST.deaths] ?? 0).padStart(3, ' ')} ${String(Math.round(st[ST.eff] ?? 0)).padStart(3, ' ')}% ${String(st[ST.dmgGiven] ?? 0).padStart(5, ' ')} ${String(st[ST.dmgTaken] ?? 0).padStart(5, ' ')}`
         + ` ${pct(st[ST.rlHits], st[ST.rlShots])} ${pct(st[ST.lgHits], st[ST.lgShots])} ${pct(st[ST.sgHits], st[ST.sgShots])} ${pct(st[ST.ssgHits], st[ST.ssgShots])} ${pct(st[ST.glHits], st[ST.glShots])}`
         + `  ${String(st[ST.ra] ?? 0).padStart(2, ' ')} ${String(st[ST.ya] ?? 0).padStart(2, ' ')} ${String(st[ST.ga] ?? 0).padStart(2, ' ')} ${String(st[ST.mh] ?? 0).padStart(2, ' ')} ${String(st[ST.quad] ?? 0).padStart(2, ' ')} ${String(st[ST.pent] ?? 0).padStart(2, ' ')}`;
       d.string(x, y, text, s.me);

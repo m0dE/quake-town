@@ -471,7 +471,7 @@ export function createFakeSim(): QtSimExports {
         I[at] = s; I[at + 1] = c.state; I[at + 2] = c.ent; I[at + 3] = c.frags;
         I[at + 5] = Number(infoValue(c.ui, 'topcolor')) || 0; I[at + 6] = Number(infoValue(c.ui, 'bottomcolor')) || 0;
         const k = c.stats[ST.kills], d = c.stats[ST.deaths];
-        c.stats[ST.eff] = k + d ? Math.round((k * 10000) / (k + d)) : 0;
+        c.stats[ST.eff] = k + d ? Math.round((k * 100) / (k + d)) : 0;
         for (let i = 0; i < 24; i++) I[at + R_STATS + i] = c.stats[i];
       }
       return R.clients;

@@ -4,14 +4,17 @@
 // (drop from the north deck or rocket-jump from the east tower), RL in the hub, LG west, GL east.
 // Copyright (C) 2026 Quake Town contributors. GPL-2.0-or-later.
 import { MapBuilder } from './lib/mapgen.mjs';
-import { platform, pillar, lamp, jumpPad, teleporter, teleDest, gate, surfaceLight, underGlow } from './lib/kit.mjs';
+import { platform, pillar, lamp, jumpPad, teleporter, teleDest, gate, surfaceLight, underGlow, frustum } from './lib/kit.mjs';
+
+/** renderer screenshot cameras: [x, y, eyeZ, pitch, yaw] */
+export const shots = [[-220, -220, 430, -4, 55], [320, 930, 690, 12, 235], [-900, -120, 494, 2, 10], [300, -700, 302, -6, 70], [640, 40, 398, -10, 160]];
 
 export const info = {
   name: 'qt_aero', title: 'Aerodrome', author: 'Quake Town',
   modes: ['duel', '2on2', 'ffa', 'ca'], players: [2, 4],
 };
 
-const SKY = 'sky5_blu';
+const SKY = 'sky_pando';
 const T = {
   top: 'aqf074', side: 'aqmetl14', trim: 'aqtrim01', under: 'aqpipe08',
   tower: 't_wall2a', towerTop: 'aqconc03', post: 'aqsupp02', metal: 'met_gry_flat',
@@ -23,8 +26,8 @@ export function build() {
     message: 'Aerodrome',
     wads: ['lq_tech.wad', 'lq_metal.wad', 'lq_liquidsky.wad', 'lq_utility.wad'],
     worldspawn: {
-      _sunlight: '300', _sun_mangle: '-35 -55 0', _sunlight_color: '1 0.92 0.8',
-      _sunlight2: '200', _sunlight2_color: '0.55 0.65 1', _minlight: '20', _bounce: '1', _dirt: '1',
+      _sunlight: '260', _sun_mangle: '-35 -55 0', _sunlight_color: '1 0.8 0.6',
+      _sunlight2: '170', _sunlight2_color: '0.95 0.6 0.5', _minlight: '20', _bounce: '1', _dirt: '1',
       sounds: '0',
     },
   });
@@ -48,7 +51,14 @@ export function build() {
     pillar(m, sx * 232, sy * 232, 8, 384, 472, T.post);
     lamp(m, [sx * 232, sy * 232, 472], { mount: 'floor', size: 10, h: 10, light: 260, color: '1 0.85 0.6' });
   }
-  m.box([-48, -48, 384, 48, 48, 392], { top: 'aqf032', side: T.trim });            // RL dais
+  frustum(m, [-56, -56, 56, 56], [-72, -72, 72, 72], 384, 392, { top: 'aqf032', bottom: T.metal, side: 'rw33_lit' }); // RL dais
+  // overhead truss across the arena (west tower → east tower) with hanging lamps
+  m.det.box([-1088, -32, 880, 1088, 32, 928], { top: T.metal, bottom: T.trim, side: 'aqsupp02' });
+  m.det.box([-32, -1100, 960, 32, 1100, 1000], { top: T.metal, bottom: T.trim, side: 'aqsupp02' });
+  for (const x of [-640, -320, 320, 640]) {
+    m.det.box([x - 4, -4, 760, x + 4, 4, 880], T.post);
+    lamp(m, [x, 0, 760], { mount: 'ceil', size: 12, h: 10, light: 300, color: '0.7 0.85 1' });
+  }
   m.item('weapon_rocketlauncher', 0, 0, 392);
   // jump pad to the north deck (RA)
   jumpPad(m, 0, 168, 384, [0, 420, 700]);

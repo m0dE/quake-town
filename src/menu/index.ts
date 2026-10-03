@@ -6,7 +6,7 @@
 import './menu.css';
 import {
   MODES, MODE_ORDER, REGIONS, decodeRoomId, encodeRoomId, homeRegion, isMode, isRegion, regionNodeUrl,
-  roomFromHash, standingConfig, toServerinfo, quickPlay, fetchServers, passwordMatches,
+  roomFromHash, standingConfig, toServerinfo, quickPlay, fetchServers, passwordMatches, mapTitles,
   type Mode, type PackIndexEntry, type RegionId, type RoomConfig,
 } from '../rooms/index.js';
 import { account, cvars, settings, type AccountState } from '../settings/index.js';
@@ -132,7 +132,7 @@ export function showMenu(root: HTMLElement, deps: MenuDeps = {}): Promise<PlayRe
   );
 
   const footer = h('footer.foot', {},
-    h('a', { href: 'LICENSE.txt', target: '_blank', rel: 'noopener' }, 'Licence (GPL-2.0)'),
+    h('a', { href: 'LICENSE.txt', target: '_blank', rel: 'noopener' }, 'Licence (GPL-2.0-or-later)'),
     h('a', { href: 'ASSET-LICENSES.txt', target: '_blank', rel: 'noopener' }, 'Art and map credits'),
     h('a', { href: 'source.zip', download: '' }, 'Source code'),
     h('span.rev', { title: 'Build' }, `build ${REV}`),
@@ -282,6 +282,7 @@ function openJoin(ctx: MenuCtx, roomId: string, config: RoomConfig, opts: { spec
   const err = h('p.err', { role: 'alert' });
   const needs = [...(config.mod ? [{ ...config.mod, what: 'Mod' }] : []), ...config.packs.map((p) => ({ ...p, what: 'Pack' }))];
   const local = needs.filter((p) => !p.url);
+  const titles = mapTitles(ctx.index());
 
   const close = (): void => { dlg.close(); dlg.remove(); };
   const go = async (spectate: boolean): Promise<void> => {
@@ -297,11 +298,14 @@ function openJoin(ctx: MenuCtx, roomId: string, config: RoomConfig, opts: { spec
       h('header', {}, h('h3', {}, config.name)),
       h('dl.facts', {},
         h('dt', {}, 'Mode'), h('dd', {}, m.label),
-        h('dt', {}, 'Maps'), h('dd', {}, config.rotation.join(', ')),
+        h('dt', {}, 'Maps'), h('dd', {}, config.rotation.map((n) => titles.get(n)?.title ?? n).join(', ')),
         h('dt', {}, 'Limits'), h('dd', {}, `${config.timelimit ? `${config.timelimit} min` : 'no time limit'}, ${config.fraglimit ? `${m.limitLabel.toLowerCase()} ${config.fraglimit}` : `no ${m.limitLabel.toLowerCase()}`}`),
         h('dt', {}, 'Players'), h('dd', {}, `up to ${config.maxclients}${config.bots ? ', bots fill empty slots' : ''}`),
         needs.length ? h('dt', {}, 'Needs') : null,
-        needs.length ? h('dd', {}, needs.map((p) => `${p.what} ${p.id}${p.url ? '' : ' (not downloadable)'}`).join(', ')) : null,
+        needs.length ? h('dd', {}, [
+          needs.length - local.length ? `${needs.length - local.length} extra ${needs.length - local.length === 1 ? 'pack' : 'packs'}, downloaded when you join` : '',
+          local.length ? `${local.length} ${local.length === 1 ? 'pack' : 'packs'} from the host’s computer` : '',
+        ].filter(Boolean).join('; ')) : null,
       ),
       local.length ? h('p.warn', {}, 'This room uses files the host loaded from their own computer. You can only join if you have the same files in this browser.') : null,
       config.password ? h('label.field', {}, h('span', {}, 'This server has a password'), pw) : null,

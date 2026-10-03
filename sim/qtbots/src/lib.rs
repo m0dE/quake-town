@@ -80,6 +80,9 @@ pub struct EntInfo<'a> {
     pub health: f32,
     pub team: i32,
     pub owner: u32,
+    /// QC `.movedir` (trigger_push direction) and `.speed`.
+    pub movedir: Vec3,
+    pub speed: f32,
 }
 
 /// What the engine exposes to bots. See API.md.
@@ -90,8 +93,8 @@ pub trait BotWorld {
     fn client(&self, slot: u32) -> Option<ClientInfo>;
     fn num_edicts(&self) -> u32;
     fn entity(&self, e: u32) -> Option<EntInfo<'_>>;
-    fn trace(&self, start: Vec3, mins: Vec3, maxs: Vec3, end: Vec3, nomonsters: bool, passent: u32) -> Trace;
-    fn trace_world(&self, start: Vec3, mins: Vec3, maxs: Vec3, end: Vec3) -> Trace;
+    fn trace(&mut self, start: Vec3, mins: Vec3, maxs: Vec3, end: Vec3, nomonsters: bool, passent: u32) -> Trace;
+    fn trace_world(&mut self, start: Vec3, mins: Vec3, maxs: Vec3, end: Vec3) -> Trace;
     fn point_contents(&self, p: Vec3) -> i32;
     fn world_bounds(&self) -> (Vec3, Vec3);
     fn random(&mut self) -> u32;

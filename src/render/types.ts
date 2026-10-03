@@ -142,7 +142,10 @@ export interface RenderSettings {
   lerpFrames: boolean;
   /** smooth lightstyle animation (interpolate between the 10 Hz steps) */
   smoothLightstyles: boolean;
-  /** r_wateralpha 0..1 (maps must be vis'd for transparent water to look right) */
+  /**
+   * r_wateralpha: < 1 enables translucent water/slime on maps whose worldspawn has
+   * `wateralpha`/`_wateralpha` (they were vis'd for it); that value is used. 1 = always opaque.
+   */
   waterAlpha: number;
   /** r_drawviewmodel */
   drawViewModel: boolean;
@@ -199,7 +202,7 @@ export const CLASSIC_SETTINGS: RenderSettings = {
 /** Modern look: trilinear + anisotropic, dynamic lights in the lightmapped shader, bloom, ACES. */
 export const MODERN_SETTINGS: RenderSettings = {
   textureFilter: 'linear', anisotropy: 8, dynamicLights: true, flashblend: false, drawflat: false,
-  fullbrightSkins: false, lerpFrames: true, smoothLightstyles: true, waterAlpha: 1, drawViewModel: true,
+  fullbrightSkins: false, lerpFrames: true, smoothLightstyles: true, waterAlpha: 0.6, drawViewModel: true,
   viewModelFov: 0, particles: 'modern', modelLighting: 'modern', bloom: true, bloomStrength: 0.55,
   toneMapping: 'aces', exposure: 1.2, ssao: false, fxaa: true, msaa: 0, gamma: 1, lightmapScale: 1,
   waterWarp: true, resolutionScale: 1, maxPixelRatio: 1.5,

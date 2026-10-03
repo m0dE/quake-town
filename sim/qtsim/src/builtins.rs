@@ -676,12 +676,8 @@ impl Host for Server {
                 let e = vm.parm_ent(0)?;
                 let key = vm.parm_str(1).to_vec();
                 let value: Vec<u8> = if e == 0 {
-                    let v = self.serverinfo.get(&key);
-                    if v.is_empty() {
-                        self.cvar_str(&key).to_vec()
-                    } else {
-                        v.to_vec()
-                    }
+                    // serverinfo, then QW's localinfo (empty here)
+                    self.serverinfo.get(&key).to_vec()
                 } else if let Some(slot) = self.not_client_slot(e) {
                     match key.as_slice() {
                         b"ip" => b"".to_vec(),

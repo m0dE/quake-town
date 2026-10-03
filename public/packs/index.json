@@ -1,10 +1,10 @@
 [
  {
-  "id": "99dfe0773ebdc30b1971439d10b0ec40545e0fbe9c1bad7aac6443a9e8617e38",
+  "id": "a4f5c56fea4b164cedbc0e67a62b3fe2f96ce620f8f798756461f121fce781dc",
   "name": "base",
   "kind": "base",
-  "file": "base-99dfe0773ebd.pk3",
-  "bytes": 6866430,
+  "file": "base-a4f5c56fea4b.pk3",
+  "bytes": 6866417,
   "files": [
    "gfx.wad",
    "gfx/bigbox.lmp",
@@ -268,16 +268,20 @@
   "title": "Quake Town base (LibreQuake)"
  },
  {
-  "id": "5311e9bf2860fe0c162a50849bdfd0ae779e6b254e278b90c77cd78a67f351ef",
+  "id": "993ade88b4258334974898917df08aaba7346cd8e26f2b7b52579569e1641da9",
   "name": "maps-qt",
   "kind": "maps",
-  "file": "maps-qt-5311e9bf2860.pk3",
-  "bytes": 258074,
+  "file": "maps-qt-993ade88b425.pk3",
+  "bytes": 1473079,
   "files": [
    "licenses/readme.txt",
    "maps.json",
    "maps/qt_aero.bsp",
-   "maps/qt_aero.lit"
+   "maps/qt_aero.lit",
+   "maps/qt_fort.bsp",
+   "maps/qt_fort.lit",
+   "maps/qt_tower.bsp",
+   "maps/qt_tower.lit"
   ],
   "title": "Quake Town maps",
   "maps": [
@@ -294,6 +298,36 @@
     "players": [
      2,
      4
+    ]
+   },
+   {
+    "name": "qt_tower",
+    "title": "Dark Spire",
+    "author": "Quake Town",
+    "modes": [
+     "duel",
+     "2on2",
+     "ffa",
+     "ca"
+    ],
+    "players": [
+     2,
+     6
+    ]
+   },
+   {
+    "name": "qt_fort",
+    "title": "Twin Keeps",
+    "author": "Quake Town",
+    "modes": [
+     "ctf",
+     "4on4",
+     "ffa",
+     "2on2"
+    ],
+    "players": [
+     6,
+     16
     ]
    }
   ]
@@ -516,11 +550,11 @@
   ]
  },
  {
-  "id": "6253a9071f972ec0691a1cd851ce61fedc5a049eed7104258bcc2cd38bde8082",
+  "id": "8f091af12b7d37ad218c6a7c8d0b6d76a8c35b314d621746da92db1d62aed71e",
   "name": "qtdm",
   "kind": "mod",
-  "file": "qtdm-6253a9071f97.pk3",
-  "bytes": 56795,
+  "file": "qtdm-8f091af12b7d.pk3",
+  "bytes": 57928,
   "files": [
    "qtdm.txt",
    "qwprogs.dat"

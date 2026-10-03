@@ -63,7 +63,8 @@ const BUILTIN_ROOM_PACKS = ['maps-lq', 'maps-qt', 'qtdm'];
 const prefetchPacks = (async () => {
   try {
     await loader.index();
-    await Promise.all(['base', ...BUILTIN_ROOM_PACKS].map((n) => loader.resolve({ id: n }).catch(() => null)));
+    // one at a time: the loader caches each verified pack by sha256 for the mounts that follow
+    for (const n of ['base', ...BUILTIN_ROOM_PACKS]) await loader.resolve({ id: n }).catch((e) => console.warn(`[boot] prefetch ${n}:`, e));
   } catch (err) { console.warn('[boot] pack prefetch:', err); }
 })();
 const wasmBytes: Promise<Uint8Array | null> = FAKE ? Promise.resolve(null) : fetch('qtsim.wasm').then(async (r) => (r.ok ? new Uint8Array(await r.arrayBuffer()) : null)).catch(() => null);
@@ -73,16 +74,21 @@ gameModule.catch(() => { /* reported at play */ });
 /** The renderer, if this build has one (src/render/renderer.ts). */
 const rendererModules = import.meta.glob('./render/renderer.ts');
 
-let baseVfs: PackVfs | null = null;
 let gfx: Gfx | null = null;
-async function base(): Promise<{ vfs: PackVfs; gfx: Gfx }> {
-  if (!baseVfs) {
+let basePromise: Promise<{ vfs: PackVfs; gfx: Gfx }> | null = null;
+/**
+ * The base pack (HUD pics, fonts, sounds), mounted once. After the prefetch: two
+ * concurrent downloads of one URL make Chromium fail one of them (ERR_CACHE_WRITE_FAILURE).
+ */
+function base(): Promise<{ vfs: PackVfs; gfx: Gfx }> {
+  basePromise ??= (async () => {
+    await prefetchPacks;
     const v = new PackVfs();
     try { await loader.mountAll(v, [{ ref: { id: 'base' }, role: 'base' }]); } catch (err) { console.warn('[boot] no base pack:', err); }
-    baseVfs = v;
     gfx = new Gfx(v);
-  }
-  return { vfs: baseVfs, gfx: gfx! };
+    return { vfs: v, gfx };
+  })();
+  return basePromise;
 }
 
 // ------------------------------------------------------------------ the console when no match is up
@@ -91,11 +97,12 @@ let consoleRaf = 0;
 const idleCanvas = document.createElement('canvas');
 idleCanvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:50;image-rendering:pixelated';
 root.append(idleCanvas);
-const idleDraw = { d: null as Draw2D | null };
+const idleDraw = { d: null as Draw2D | null, dirty: false };
 function idleConsole(now: number): void {
   consoleRaf = requestAnimationFrame(idleConsole);
-  if (current) return;
   const ctx = idleCanvas.getContext('2d')!;
+  if (current) { if (idleDraw.dirty) { ctx.clearRect(0, 0, idleCanvas.width, idleCanvas.height); idleDraw.dirty = false; } return; }
+  idleDraw.dirty = true;
   const w = Math.round(innerWidth * Math.min(2, devicePixelRatio)), h = Math.round(innerHeight * Math.min(2, devicePixelRatio));
   if (idleCanvas.width !== w || idleCanvas.height !== h) { idleCanvas.width = w; idleCanvas.height = h; }
   ctx.clearRect(0, 0, w, h);
@@ -163,7 +170,7 @@ async function prepare(config: RoomConfig, serverinfo: string): Promise<{ vfs: P
   }
   const sim = simCache.sim;
   const fake = sim.version === 0xfa4e0001;
-  const simView: Vfs = (vfs as unknown as { sim?: Vfs }).sim ?? vfs;
+  const simView: Vfs = vfs.sim;          // never the id paks: the sim reads only the room's packs
   const progs = fake ? new Uint8Array(4) : simView.get('qwprogs.dat');
   if (!progs) throw new Error('the room\'s mod has no qwprogs.dat');
   const progsKey = `${packs.join('.')}`;
@@ -209,6 +216,7 @@ async function play(req: PlayRequest, demo?: DemoFile): Promise<void> {
       makeRenderer: (canvas) => (fake ? Promise.resolve(null) : makeRenderer(canvas, p.vfs)),
       cvars, cmds, console: con, gfx: g,
       userinfo: settingsUserinfo,
+      pausePanel: !params.has('test'),
       ...(demo ? { demo } : {}),
     }, (label) => status(label));
     current = game;
@@ -342,15 +350,25 @@ cmds.forward = (line) => !!current && current.modCommand(line);
 // ------------------------------------------------------------------ the arena probe (tests only)
 
 async function installProbe(game: Game): Promise<void> {
-  const probes = import.meta.glob('../../arrr-mono/harness/arena/probe.ts');
+  // Dev builds and test builds (VITE_QT_PROBE=1) only: the harness is not part of the game and never ships.
+  const probes: Record<string, () => Promise<unknown>> = import.meta.env.DEV || import.meta.env.VITE_QT_PROBE === '1' ? import.meta.glob('../../arrr-mono/harness/arena/probe.ts') : {};
   const load = Object.values(probes)[0];
   if (!load) { console.warn('[probe] harness/arena/probe.ts is not reachable from this build'); return; }
   const mod = await load() as { installProbe: (hooks: Record<string, unknown>) => void };
+  const rec = <T,>(m: Map<string, T>): Record<string, T> => Object.fromEntries(m);
   mod.installProbe({
+    name: 'quake-town',
+    tickHz: 77,
     lockstep: () => game.session?.lockstep,
-    clock: () => game.lastTimes ? { others: game.lastTimes.others, self: game.lastTimes.self } : null,
-    drawn: () => game.drawnBodies,
-    sim: () => game.simBodies(),
+    clock: () => {
+      const t = game.lastTimes, ls = game.session?.lockstep;
+      if (!t || !ls) return null;
+      const selfFrame = (ls.prediction?.frame ?? ls.frame) - 1;
+      return { frame: ls.frame, alpha: t.others - ls.frame, selfFrame, selfAlpha: t.self - selfFrame, at: game.lastDrawAt };
+    },
+    drawn: () => rec(game.drawnBodies),
+    sim: () => rec(game.simBodies()),
+    self: () => game.session?.playerId ?? null,
   });
 }
 

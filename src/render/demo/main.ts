@@ -4,6 +4,7 @@
 // window.__qt for screenshots and measurements).
 // Copyright (C) 2026 Quake Town contributors. GPL-2.0-or-later.
 import { Renderer } from '../renderer';
+import { renderCharacterPreview } from '../preview';
 import {
   CLASSIC_SETTINGS, EF_BLUE, EF_RED, EV_MUZZLEFLASH, EV_TEMP_ENTITY, MODERN_SETTINGS, TE_EXPLOSION, TE_GUNSHOT, TE_LIGHTNING2,
   TE_TELEPORT, createRenderFrame, type RenderEntity, type RenderFrame,
@@ -282,6 +283,24 @@ async function main(): Promise<void> {
   const pak = await fetchBytes('/render-test/pak0.pak');
   if (!pak) { hud.textContent = 'missing .cache/render-test/pak0.pak'; return; }
   vfs.mountPak(pak);
+  if (params.get('preview') === '1') {
+    // menu character preview on a 2:3 canvas over a dark gradient
+    canvas.remove();
+    document.body.style.background = 'radial-gradient(circle at 50% 40%, #3a3127, #0d0b09 70%)';
+    const pc = document.createElement('canvas');
+    pc.style.cssText = 'position:fixed;left:50%;top:50%;width:360px;height:540px;transform:translate(-50%,-50%);';
+    document.body.appendChild(pc);
+    hud.style.display = 'none';
+    (document.getElementById('help') as HTMLElement).style.display = 'none';
+    const look = { skin: Number(params.get('skin') ?? 0), top: Number(params.get('top') ?? 4), bottom: Number(params.get('bottom') ?? 12) };
+    const pset = params.get('preset') === 'classic' ? CLASSIC_SETTINGS : MODERN_SETTINGS;
+    window.__qt = { preview: (t: number) => { renderCharacterPreview(pc, vfs, look, t, pset); return pc.toDataURL('image/png'); }, look };
+    if (manual) { document.title = 'ready'; return; }
+    const t0p = performance.now();
+    const loopP = (): void => { renderCharacterPreview(pc, vfs, look, (performance.now() - t0p) / 1000, pset); requestAnimationFrame(loopP); };
+    requestAnimationFrame(loopP);
+    return;
+  }
   const preset = params.get('preset') === 'classic' ? CLASSIC_SETTINGS : MODERN_SETTINGS;
   renderer = new Renderer(canvas, vfs, preset);
   resize();
@@ -310,6 +329,17 @@ async function main(): Promise<void> {
     explode: (x: number, y: number, z: number) => addEvent(EV_TEMP_ENTITY, TE_EXPLOSION, 0, 0, x, y, z),
     teleport: (x: number, y: number, z: number) => addEvent(EV_TEMP_ENTITY, TE_TELEPORT, 0, 0, x, y, z),
     lightning: (until: number) => { lightningUntil = until; },
+    /** effects showcase starting at t0: rocket, explosion ahead, teleport splash, lightning */
+    fxDemo: (t0: number) => {
+      fireRocket(t0);
+      const [x, y, z] = forward(260);
+      const [lx, ly, lz] = forward(140);
+      const d2r = Math.PI / 180;
+      addEvent(EV_TEMP_ENTITY, TE_EXPLOSION, 0, 0, x + Math.sin(cam.yaw * d2r) * 90, y - Math.cos(cam.yaw * d2r) * 90, z);
+      addEvent(EV_TEMP_ENTITY, TE_TELEPORT, 0, 0, lx - Math.sin(cam.yaw * d2r) * 60, ly + Math.cos(cam.yaw * d2r) * 60, lz);
+      addEvent(EV_TEMP_ENTITY, TE_GUNSHOT, 3, 0, lx, ly, lz - 20);
+      lightningUntil = t0 + 0.6;
+    },
     hideHud: () => { showHud = false; hud.style.display = 'none'; (document.getElementById('help') as HTMLElement).style.display = 'none'; },
     EF_BLUE, EF_RED,
   };

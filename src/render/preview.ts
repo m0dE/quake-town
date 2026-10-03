@@ -7,7 +7,7 @@ import { AliasModel, AliasShared, aliasMaterial, bindAliasModel, entityMatrix } 
 import { MAX_DLIGHTS } from './shaders';
 import { loadMdl, mdlPose, mdlSkinImage } from './mdl';
 import { Palette } from './palette';
-import type { PlayerLook } from './types';
+import type { PlayerLook, RenderSettings } from './types';
 
 const SHADOW_VS = /* glsl */ `
 precision highp float;
@@ -52,14 +52,14 @@ function init(canvas: HTMLCanvasElement, vfs: Vfs): PreviewState {
   gl.setClearColor(0x000000, 0);
   const scene = new THREE.Scene();
   scene.matrixWorldAutoUpdate = false;
-  const camera = new THREE.PerspectiveCamera(32, 1, 4, 1000);
+  const camera = new THREE.PerspectiveCamera(30, 1, 4, 1000);
   camera.matrixAutoUpdate = false;
   const shared = new AliasShared();
   const su = {
     uNumDl: { value: 0 },
     uDlPos: { value: Array.from({ length: MAX_DLIGHTS }, () => new THREE.Vector4()) },
     uDlCol: { value: Array.from({ length: MAX_DLIGHTS }, () => new THREE.Vector4()) },
-    uFog: { value: new THREE.Vector4() },
+    uFog: { value: new THREE.Vector4(0, 0, 0, 0) },
     uCam: { value: new THREE.Vector3() },
   };
   const mat = aliasMaterial(shared, su, false);
@@ -70,7 +70,7 @@ function init(canvas: HTMLCanvasElement, vfs: Vfs): PreviewState {
   const sg = new THREE.PlaneGeometry(2, 2);
   const smat = new THREE.RawShaderMaterial({
     vertexShader: SHADOW_VS, fragmentShader: SHADOW_FS, glslVersion: THREE.GLSL3, transparent: true, depthWrite: false,
-    uniforms: { uStrength: { value: 0.6 } },
+    uniforms: { uStrength: { value: 0.8 } },
   });
   const shadow = new THREE.Mesh(sg, smat);
   shadow.frustumCulled = false;
@@ -78,7 +78,7 @@ function init(canvas: HTMLCanvasElement, vfs: Vfs): PreviewState {
   shadow.renderOrder = -1;
   scene.add(shadow);
   // camera: front, slightly above the chest, looking at the model's centre (Quake axes, z up)
-  const eye = new THREE.Vector3(118, 0, 18), target = new THREE.Vector3(0, 0, 2);
+  const eye = new THREE.Vector3(140, 0, 16), target = new THREE.Vector3(0, 0, 2);
   const f = target.clone().sub(eye).normalize();
   const r = new THREE.Vector3().crossVectors(f, new THREE.Vector3(0, 0, 1)).normalize();
   const u = new THREE.Vector3().crossVectors(r, f);
@@ -95,7 +95,8 @@ function init(canvas: HTMLCanvasElement, vfs: Vfs): PreviewState {
  * Draw the menu preview of `look` at time `t` (seconds; call every animation frame).
  * Cheap: one model draw + one shadow quad.
  */
-export function renderCharacterPreview(canvas: HTMLCanvasElement, vfs: Vfs, look: PlayerLook, t: number): void {
+export function renderCharacterPreview(canvas: HTMLCanvasElement, vfs: Vfs, look: PlayerLook, t: number,
+  settings?: Pick<Partial<RenderSettings>, 'textureFilter' | 'modelLighting'>): void {
   let s = states.get(canvas);
   if (!s || s.vfs !== vfs) { if (s) disposeCharacterPreview(canvas); s = init(canvas, vfs); states.set(canvas, s); }
   const w = canvas.clientWidth || canvas.width, h = canvas.clientHeight || canvas.height;
@@ -112,9 +113,10 @@ export function renderCharacterPreview(canvas: HTMLCanvasElement, vfs: Vfs, look
   if (model === undefined) {
     const d = vfs.get(name);
     model = d ? new AliasModel(loadMdl(d), s.pal) : null;
-    model?.setFilter('linear', 4);
     s.models.set(name, model);
   }
+  const classic = settings?.modelLighting === 'classic';
+  model?.setFilter(settings?.textureFilter ?? 'linear', 4);
   s.gl.clear();
   if (!model) return;
   const mat = s.mat;
@@ -125,22 +127,31 @@ export function renderCharacterPreview(canvas: HTMLCanvasElement, vfs: Vfs, look
   const fa = isPlayer ? 12 + (Math.floor(ft) % 5) : 0, fb = isPlayer ? 12 + ((Math.floor(ft) + 1) % 5) : 0;
   const pa = mdlPose(model.mdl, fa, t), pb = mdlPose(model.mdl, fb, t);
   (mat.uniforms.uPose.value as THREE.Vector4).set(pa, pb, ft - Math.floor(ft), model.rows);
-  const yaw = 200 + t * 24;
+  // three-quarter front view at t = 0, turning slowly to the left
+  const yaw = -30 + t * 24;
   // feet on the ground: put the lowest point of the model at z = -24
   entityMatrix(s.mesh.matrixWorld, 0, 0, 0, 0, yaw, 0);
   mat.uniforms.uSkin.value = model.skin(look.skin, mdlSkinImage(model.mdl, look.skin, t), ((look.top & 15) << 4) | (look.bottom & 15));
-  (mat.uniforms.uLight.value as THREE.Vector4).set(0.62, 0.9, 0, 0);
-  (mat.uniforms.uLightCol.value as THREE.Vector3).set(1.12, 1.06, 0.98);
-  (mat.uniforms.uLightDir.value as THREE.Vector3).set(0.55, 0.45, 0.7).normalize();
-  mat.uniforms.uModern.value = 1;
-  mat.uniforms.uRim.value = 0.75;
+  if (classic) {
+    // GLQuake shading: shadedots row for the yaw, light level 200 (QuakeSpasm clamp → 96 × 2 / 200)
+    (mat.uniforms.uLight.value as THREE.Vector4).set(0, 1, ((yaw * (16 / 360)) | 0) & 15, 0);
+    (mat.uniforms.uLightCol.value as THREE.Vector3).set(0.96, 0.96, 0.96);
+    mat.uniforms.uModern.value = 0;
+    mat.uniforms.uRim.value = 0;
+  } else {
+    (mat.uniforms.uLight.value as THREE.Vector4).set(0.62, 0.9, 0, 0);
+    (mat.uniforms.uLightCol.value as THREE.Vector3).set(1.12, 1.06, 0.98);
+    (mat.uniforms.uLightDir.value as THREE.Vector3).set(0.55, 0.45, 0.7).normalize();
+    mat.uniforms.uModern.value = 1;
+    mat.uniforms.uRim.value = 0.75;
+  }
   (mat.uniforms.uShell.value as THREE.Vector3).set(0, 0, 0);
   mat.uniforms.uEmissive.value = 0;
   mat.uniforms.uAlpha.value = 1;
   const b = model.mdl.poseBounds;
   const zmin = Math.min(b[pa * 6 + 2], b[pb * 6 + 2]);
   const m = s.shadow.matrixWorld;
-  m.makeScale(30, 30, 1);
+  m.makeScale(34, 34, 1);
   m.setPosition(0, 0, zmin + 0.5);
   s.gl.render(s.scene, s.camera);
 }

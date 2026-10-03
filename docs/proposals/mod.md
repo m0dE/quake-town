@@ -17,11 +17,9 @@
    `0` = none; default 3), `capturelimit` (CTF, default 0 = none), `rounds` (CA, default 7),
    `roundtime` (CA seconds, default 300, then the round is a draw), `rj` (id's rocket-jump
    multiplier), `dq`/`dr` (id's drop quad / ring), `rotation`.
-5. **teamplay 2 semantics.** Implemented as DESIGN says: a teammate's hit costs armor,
-   never health (self damage is full). Note that in QW/KTX 4on4 "teamplay 2" usually
-   means *full* team damage (id's qw-qc: teamplay 2 = team damage on, frag penalty).
-   If the integrator wants that instead, it is one line in `combat.qc`
-   (`teamarmoronly`).
+5. **teamplay 2 semantics** (decided): full team damage, health and armor, as id's QW /
+   KTX; a teamkill costs the killer a frag. DESIGN's "no team damage to health" text
+   should be changed.
 6. **teamplay 1 (CTF, CA)** is id's: no damage to teammates **or yourself** (knockback
    still applies, so rocket jumps are free).
 

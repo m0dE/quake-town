@@ -43,19 +43,22 @@ for (const map of maps) {
       await page.evaluate(([x, y, z, yaw]) => window.__qt.setView(x, y, z + 22, 8, yaw), [sp.x, sp.y, sp.z, sp.yaw]);
       let t = 10 + v;
       if (fx) {
-        await page.evaluate(([tt]) => { window.__qt.fireRocket(tt); }, [t - 0.5]);
+        // run the effects showcase for 0.3 s of frames so particles and the sprite evolve
+        const t0 = t - 0.3;
+        await page.evaluate((tt) => window.__qt.fxDemo(tt), t0);
+        for (let k = 0; k < 9; k++) await page.evaluate((tt) => window.__qt.render(tt), t0 + k / 30);
       }
       // warm up (texture uploads, shader compiles), then measure
-      for (let k = 0; k < 3; k++) await page.evaluate((tt) => window.__qt.render(tt), t + k * 0.016);
+      if (!fx) for (let k = 0; k < 3; k++) await page.evaluate((tt) => window.__qt.render(tt), t + k * 0.016);
       const ms = [], prep = [];
       let st;
       for (let k = 0; k < 10; k++) {
-        st = await page.evaluate((tt) => window.__qt.render(tt), t + 0.05 + k * 0.007);
+        st = await page.evaluate((tt) => window.__qt.render(tt), t + k * 0.004);
         ms.push(st.ms); prep.push(st.prepMs);
       }
       ms.sort((a, b) => a - b); prep.sort((a, b) => a - b);
-      const file = path.join(out, `${map}-${v}-${preset}.png`);
-      const url = await page.evaluate((tt) => { window.__qt.render(tt); return document.getElementById('c').toDataURL('image/png'); }, t + 0.12);
+      const file = path.join(out, `${map}-${v}-${preset}${fx ? '-fx' : ''}.png`);
+      const url = await page.evaluate((tt) => { window.__qt.render(tt); return document.getElementById('c').toDataURL('image/png'); }, t + 0.045);
       fs.writeFileSync(file, Buffer.from(url.split(',')[1], 'base64'));
       const r = { map, view: v, preset, calls: st.drawCalls, tris: st.tris, faces: st.faces, leafs: st.leafs, cpuMedian: +ms[5].toFixed(2), cpuMax: +ms[9].toFixed(2), prepMedian: +prep[5].toFixed(2), prepMax: +prep[9].toFixed(2), file: path.relative(process.cwd(), file) };
       results.push(r);

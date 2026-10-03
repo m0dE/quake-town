@@ -1,9 +1,9 @@
 {
-  "id": "7340f6e3b1a53323ebc3213af16487611cbeda6ee41bf6b02f6aaf94358d88ea",
+  "id": "8f091af12b7d37ad218c6a7c8d0b6d76a8c35b314d621746da92db1d62aed71e",
   "name": "qtdm",
   "kind": "mod",
-  "file": "packs/qtdm-7340f6e3b1a5.pk3",
-  "bytes": 57959,
+  "file": "packs/qtdm-8f091af12b7d.pk3",
+  "bytes": 57928,
   "files": [
     "qtdm.txt",
     "qwprogs.dat"

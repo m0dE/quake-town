@@ -39,7 +39,12 @@ interface MenuDeps {
   idPaks?: IdPakLoader;                      // content part's id-pak loader (see below)
   cacheLocalPack?: (file: File) => Promise<{ id: string; name: string; bytes: number }>;
                                              // host's local .pk3/.pak → cached by sha256 (content part)
+  models?: () => string[];                   // Player screen model list (default ['player'])
+  skins?: () => string[];                    // Player screen skin list (default ['base'])
 }
+
+// PlayerLook (src/settings) = { model, skin, topcolor, bottomcolor } — the cvar values. The
+// renderer's PlayerLook differs; adapt in main.ts (docs/proposals/menu.md has the snippet).
 
 interface IdPakLoader {
   status(): Promise<{ loaded: boolean; files: { name: string; bytes: number }[] }>;

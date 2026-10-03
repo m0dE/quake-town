@@ -50,7 +50,8 @@ impl World {
                 if !sv.clients[e as usize - 1].spawned {
                     continue;
                 }
-            } else if modelindex == 0 {
+            } else if modelindex == 0 || vm.e_str(e, fld::MODEL).is_empty() {
+                // sv_ents.c: SV_WritePacketEntities skips !modelindex || !*model
                 continue;
             }
             let flags = vm.e_f(e, fld::FLAGS) as i32;

@@ -32,7 +32,7 @@ export function pillar(m, x, y, r, z0, z1, tex) {
 }
 
 /** A lamp: a small fullbright fixture box plus a light entity just below/in front of it. */
-export function lamp(m, [x, y, z], { size = 8, h = 8, tex = 'tlight11', light = 220, color = null, wait = null, mount = 'ceil', side = 'met_gry_flat', delay = null } = {}) {
+export function lamp(m, [x, y, z], { size = 8, h = 8, tex = 'tlight11', light = 220, color = null, wait = '0.7', mount = 'ceil', side = 'met_gry_flat', delay = null } = {}) {
   if (mount === 'ceil') {
     m.det.box([x - size, y - size, z - h, x + size, y + size, z], { top: side, bottom: tex, side });
     m.light([x, y, z - h - 12], light, { ...(color ? { _color: color } : {}), ...(wait ? { wait } : {}), ...(delay ? { delay } : {}) });
@@ -138,4 +138,12 @@ export function surfaceLight(m, tex, light, color = null, extra = {}) {
 export function underGlow(m, x, y, z, { r = 24, tex = 't_lit07', side = 'met_gry_flat', light = 160, color = '0.6 0.8 1' } = {}) {
   m.det.box([x - r, y - r, z - 8, x + r, y + r, z], { top: side, bottom: tex, side });
   m.light([x, y, z - 32], light, { _color: color });
+}
+
+/** invisible fill lights on a grid inside a box (x0,y0,x1,y1 at height z) */
+export function fill(m, [x0, y0, x1, y1], z, { spacing = 256, light = 260, color = null, wait = '0.5' } = {}) {
+  const nx = Math.max(1, Math.round((x1 - x0) / spacing)), ny = Math.max(1, Math.round((y1 - y0) / spacing));
+  for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) {
+    m.light([x0 + ((i + 0.5) * (x1 - x0)) / nx, y0 + ((j + 0.5) * (y1 - y0)) / ny, z], light, { wait, ...(color ? { _color: color } : {}) });
+  }
 }

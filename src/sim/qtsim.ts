@@ -481,9 +481,6 @@ export function createQtApp(sim: QtSim, opts: QtAppOptions): QtApp {
       return `${slot},${q(f[CV.origin])},${q(f[CV.origin + 1])},${q(f[CV.origin + 2])},${cv[CV.health]}`;
     },
 
-    status(s) {
-      return { tick: sim.tickCount(s.h), humans: s.slots.filter(Boolean).length, members: Object.keys(s.names).length };
-    },
   };
   return app;
 }

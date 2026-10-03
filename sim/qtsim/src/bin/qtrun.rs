@@ -71,7 +71,7 @@ fn main() {
         eprintln!("{progs_path}: {e}");
         std::process::exit(1)
     });
-    let progs = qcvm::Progs::load(&pbytes).unwrap_or_else(|e| {
+    let progs = qtsim::qcvm::Progs::load(&pbytes).unwrap_or_else(|e| {
         eprintln!("progs_load: {e} (code {})", e.code());
         std::process::exit(1)
     });

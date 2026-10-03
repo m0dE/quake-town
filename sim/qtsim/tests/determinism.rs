@@ -7,7 +7,7 @@ use qtsim::scenario::*;
 use qtsim::World;
 
 fn load(map: &str, info: &str, seed: u32) -> World {
-    let progs = qcvm::Progs::load(&std::fs::read(QW_PROGS).unwrap()).unwrap();
+    let progs = qtsim::qcvm::Progs::load(&std::fs::read(QW_PROGS).unwrap()).unwrap();
     let m = Map::load(map, &std::fs::read(format!("{LQ_MAPS}/{map}.bsp")).unwrap()).unwrap();
     World::new(progs, vec![Arc::new(m)], 0, seed, info.as_bytes()).unwrap()
 }
@@ -63,7 +63,7 @@ fn clone_at_5000_agrees_for_5000() {
 
 #[test]
 fn serialize_roundtrip_at_random_ticks() {
-    let progs = qcvm::Progs::load(&std::fs::read(QW_PROGS).unwrap()).unwrap();
+    let progs = qtsim::qcvm::Progs::load(&std::fs::read(QW_PROGS).unwrap()).unwrap();
     let m = Arc::new(Map::load("lqdm2", &std::fs::read(format!("{LQ_MAPS}/lqdm2.bsp")).unwrap()).unwrap());
     let mut a = World::new(progs.clone(), vec![m.clone()], 0, 11, INFO.as_bytes()).unwrap();
     let mut buf = Vec::new();

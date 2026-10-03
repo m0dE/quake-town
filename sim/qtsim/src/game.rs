@@ -114,6 +114,8 @@ impl World {
             loading: false,
             serverflags: 0.0,
             clients: vec![Client::new(); maxclients],
+            botsys: crate::bots::BotSys::new(maxclients),
+            spawn_info: Vec::new(),
             areanodes: Vec::new(),
             links: Vec::new(),
             max_edicts,
@@ -127,6 +129,7 @@ impl World {
             intermission: None,
             error: None,
             sink: EventSink::default(),
+            pending: EventSink::default(),
             buf_all: MsgBuf::default(),
             buf_multicast: MsgBuf::default(),
             buf_one: vec![MsgBuf::default(); maxclients],
@@ -149,6 +152,8 @@ impl World {
             return Err(e.to_string());
         }
         w.flush_tick_buffers();
+        let made = std::mem::take(&mut w.sv.sink);
+        w.sv.pending.append(made);
         Ok(w)
     }
 
@@ -175,6 +180,8 @@ impl World {
         sv.checkpvs.clear();
         sv.changelevel = None;
         sv.intermission = None;
+        sv.spawn_info = sv.serverinfo.encode();
+        sv.botsys.new_map(sv.maxclients);
 
         // clear physics interaction links
         sv.clear_world();
@@ -268,7 +275,7 @@ impl World {
 
     /// world_tick
     pub fn tick(&mut self) {
-        self.sv.sink.clear();
+        self.sv.sink = std::mem::take(&mut self.sv.pending);
         if self.stopped() {
             return;
         }
@@ -286,11 +293,7 @@ impl World {
         sv.time = 1.0 + sv.map_ticks as f64 * (TICK_MSEC as f64 * 0.001);
 
         // 1. bots compute their usercmds
-        for slot in 0..sv.maxclients {
-            if sv.bot_driven(slot) {
-                sv.bot_think(vm, slot);
-            }
-        }
+        sv.bots_think(vm);
         // 2. clients in slot order
         for slot in 0..sv.maxclients {
             if sv.clients[slot].spawned {
@@ -359,11 +362,15 @@ impl World {
             return;
         }
         self.vm.set_budget(TICK_BUDGET);
+        // the last tick's events stay readable; new ones go out with the next tick
+        let last = std::mem::take(&mut self.sv.sink);
         let r = f(&mut self.vm, &mut self.sv);
         if let Err(e) = r {
             self.fail(e);
         }
         self.flush_tick_buffers();
+        let made = std::mem::replace(&mut self.sv.sink, last);
+        self.sv.pending.append(made);
     }
 
     /// world_client_join
@@ -376,6 +383,7 @@ impl World {
             CS_HUMAN => Ok(()),
             CS_IDLE => {
                 sv.clients[slot].state = CS_HUMAN;
+                sv.botsys.remove(slot);
                 sv.clients[slot].cmd = UserCmd { msec: TICK_MSEC, ..Default::default() };
                 apply_userinfo(vm, sv, slot, &info)
             }
@@ -409,6 +417,8 @@ impl World {
     pub fn client_idle(&mut self, slot: usize) {
         if slot < self.sv.maxclients && self.sv.clients[slot].state == CS_HUMAN {
             self.sv.clients[slot].state = CS_IDLE;
+            let sk = crate::bots::bot_skill(&self.sv, slot);
+            self.sv.botsys.add(slot, sk);
         }
     }
 

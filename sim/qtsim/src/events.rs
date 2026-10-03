@@ -146,6 +146,20 @@ impl EventSink {
     pub fn push(&mut self, e: Event) {
         self.events.push(e);
     }
+
+    /// append another sink's events, remapping their string indices
+    pub fn append(&mut self, other: EventSink) {
+        let base = self.strings.len() as u32;
+        for mut e in other.events {
+            match e.kind() {
+                EV_PRINT => e.w[3] += base,
+                EV_CENTERPRINT | EV_STUFFTEXT | EV_LIGHTSTYLE => e.w[2] += base,
+                _ => {}
+            }
+            self.events.push(e);
+        }
+        self.strings.extend(other.strings);
+    }
 }
 
 /// Result of trying to parse one message from the front of a token buffer.

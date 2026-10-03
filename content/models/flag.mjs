@@ -32,7 +32,7 @@ function skin(pal, base) {
       if (x >= 48) {
         // pole: brushed metal, darker at the edges of the strip
         const e = Math.abs(x - 55.5) / 8;
-        const v = 150 - e * 60 + ((x * 7 + y * 3) % 5) * 3;
+        const v = 110 - e * 45 + ((x * 7 + y * 3) % 5) * 3;
         c = [v, v * 0.95, v * 0.85];
       } else if (y < 32) {
         // cloth 48×32: border, field, emblem (a diamond with a ring)

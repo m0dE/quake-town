@@ -106,6 +106,8 @@ pub struct Map {
     /// the world's visleafs (Mod_LeafPVS row size is (numleafs+7)>>3)
     pub numleafs: usize,
     pub bsp2: bool,
+    /// FNV-1a 64 of the file bytes
+    pub fingerprint: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -373,6 +375,7 @@ impl Map {
             visdata,
             numleafs,
             bsp2,
+            fingerprint: bytes.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, &b| (h ^ b as u64).wrapping_mul(0x0100_0000_01b3)),
         })
     }
 

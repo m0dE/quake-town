@@ -149,9 +149,11 @@ export class BrushSet {
     for (let b = 0; b < g.batches.length; b++) {
       const bt = g.batches[b];
       if (bt.kind === 'warp') {
-        const want = waterAlpha < 1 ? this.warpTrans[b]! : this.warpOpaque[b]!;
-        if (this.materials[b] !== want) this.materials[b] = want;
         const name = bt.tex >= 0 ? g.bsp.textures[bt.tex]?.name ?? '' : '';
+        // only water and slime turn translucent (lava and teleporters stay solid, as in QS)
+        const clear = waterAlpha < 1 && !name.includes('lava') && !name.includes('tele');
+        const want = clear ? this.warpTrans[b]! : this.warpOpaque[b]!;
+        if (this.materials[b] !== want) this.materials[b] = want;
         want.uniforms.uEmissive.value = bloom ? (name.includes('lava') ? 0.7 : name.includes('tele') ? 0.4 : name.includes('slime') ? 0.25 : 0.03) : 0;
         continue;
       }

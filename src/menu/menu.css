@@ -521,7 +521,7 @@
 
 /* fixes after the first screenshot pass */
 .qt-menu [hidden] { display: none !important; }
-.qt-menu button { white-space: nowrap; }
+.qt-menu button.small, .qt-menu .cta { white-space: nowrap; }
 .row3, .row2 { align-items: start; }
 .mapbtn { align-content: start; }
 .c-pl .fill { bottom: 3px; }
@@ -531,3 +531,8 @@
 }
 .sbody > .detail { border-width: 0 0 1px; background: var(--iron-2); }
 .sbody > .detail h3 { display: none; }
+@media (max-width: 760px) {
+  .d-act { flex: 1 1 100%; }
+  .cta.big { font-size: 17px; padding: 14px 22px; }
+  .maplist { max-height: 260px; }
+}

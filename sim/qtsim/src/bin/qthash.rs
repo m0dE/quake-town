@@ -9,7 +9,7 @@ fn main() {
     let ticks: u32 = a.get(2).and_then(|x| x.parse().ok()).unwrap_or(5000);
     let seed: u32 = a.get(3).and_then(|x| x.parse().ok()).unwrap_or(1);
     let info = a.get(4).cloned().unwrap_or("\\deathmatch\\3\\maxclients\\8\\bots\\1".into());
-    let progs = qcvm::Progs::load(&std::fs::read(qtsim::scenario::QW_PROGS).unwrap()).unwrap();
+    let progs = qtsim::qcvm::Progs::load(&std::fs::read(qtsim::scenario::QW_PROGS).unwrap()).unwrap();
     let path = format!("{}/{map}.bsp", qtsim::scenario::LQ_MAPS);
     let m = qtsim::bsp::Map::load(&map, &std::fs::read(path).unwrap()).unwrap();
     let mut w = qtsim::World::new(progs, vec![Arc::new(m)], 0, seed, info.as_bytes()).unwrap();

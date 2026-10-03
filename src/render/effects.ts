@@ -228,13 +228,13 @@ export class Particles {
 
 export const MAX_DLIGHT_SLOTS = 64;
 
-/** dlight colour types of CL_NewDlight: 0 orange (rockets, explosions, muzzle), 1 blue, 2 red, 3 purple */
+/** dlight colour types of CL_NewDlight: 0 orange (rockets, explosions, muzzle), 1 blue, 2 red, 3 purple; 4 lightning (modern only) */
 export const DL_COLORS = [
-  [0.2, 0.1, 0.05], [0.05, 0.05, 0.3], [0.5, 0.05, 0.05], [0.5, 0.05, 0.4],
+  [0.2, 0.1, 0.05], [0.05, 0.05, 0.3], [0.5, 0.05, 0.05], [0.5, 0.05, 0.4], [0.1, 0.12, 0.3],
 ];
 /** Colours the modern renderer lights with (QW lit the world white) */
 export const DL_LIGHT_COLORS = [
-  [1.0, 0.78, 0.5], [0.35, 0.45, 1.6], [1.6, 0.35, 0.3], [1.2, 0.35, 1.3],
+  [1.0, 0.78, 0.5], [0.35, 0.45, 1.6], [1.6, 0.35, 0.3], [1.2, 0.35, 1.3], [0.55, 0.7, 1.5],
 ];
 
 export class Dlights {

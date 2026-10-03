@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 use qcvm::{Progs, StateHasher, Vm};
 
-use crate::bots::BotState;
 use crate::bsp::Map;
 use crate::events::{EventSink, MsgBuf};
 use crate::info::Info;
@@ -144,27 +143,6 @@ fn r_cmd(r: &mut R) -> Res<UserCmd> {
         impulse: r.u32()? as u8,
     })
 }
-fn w_bot(w: &mut W, b: &BotState) {
-    w.f32(b.yaw);
-    w.f32(b.pitch);
-    w.u32(b.stuck);
-    w.v3(&b.last_origin);
-    w.f32(b.turn);
-    w.u32(b.jump_hold);
-    w.u32(b.enemy);
-}
-fn r_bot(r: &mut R) -> Res<BotState> {
-    Ok(BotState {
-        yaw: r.f32()?,
-        pitch: r.f32()?,
-        stuck: r.u32()?,
-        last_origin: r.v3()?,
-        turn: r.f32()?,
-        jump_hold: r.u32()?,
-        enemy: r.u32()?,
-    })
-}
-
 /// Everything in Server that is state, in a fixed order (used by both serialize and
 /// hash so the two can never disagree about what the state is).
 fn write_server(w: &mut W, sv: &Server) {
@@ -206,7 +184,6 @@ fn write_server(w: &mut W, sv: &Server) {
         for s in &c.stats {
             w.i32(*s);
         }
-        w_bot(w, &c.bot);
     }
     w.u32(sv.links.len() as u32);
     for l in &sv.links {
@@ -257,6 +234,10 @@ fn write_server(w: &mut W, sv: &Server) {
         }
         None => w.u32(0),
     }
+    w.bytes(&sv.spawn_info);
+    let mut b = Vec::new();
+    sv.botsys.serialize(&mut b);
+    w.bytes(&b);
 }
 
 impl World {
@@ -361,7 +342,6 @@ fn read_server(r: &mut R, progs: Arc<Progs>, maps: Vec<Arc<Map>>) -> Res<Server>
         for s in c.stats.iter_mut() {
             *s = r.i32()?;
         }
-        c.bot = r_bot(r)?;
         clients.push(c);
     }
     let nlinks = r.count(1 << 20)?;
@@ -400,6 +380,12 @@ fn read_server(r: &mut R, progs: Arc<Progs>, maps: Vec<Arc<Map>>) -> Res<Server>
     };
     let intermission = if r.u32()? != 0 { Some(r.v3()?) } else { None };
     let error = if r.u32()? != 0 { Some(String::from_utf8_lossy(&r.bytes()?).to_string()) } else { None };
+    let spawn_info = r.bytes()?;
+    let bb = r.bytes()?;
+    let (botsys, used) = crate::bots::BotSys::deserialize(&bb).map_err(|_| ())?;
+    if used != bb.len() {
+        return Err(());
+    }
 
     let ext = ExtFields {
         gravity: progs.find_field("gravity").map(|d| d.ofs),
@@ -434,6 +420,8 @@ fn read_server(r: &mut R, progs: Arc<Progs>, maps: Vec<Arc<Map>>) -> Res<Server>
         loading,
         serverflags,
         clients,
+        botsys,
+        spawn_info,
         areanodes: Vec::new(),
         links: Vec::new(),
         max_edicts: 0,
@@ -447,6 +435,7 @@ fn read_server(r: &mut R, progs: Arc<Progs>, maps: Vec<Arc<Map>>) -> Res<Server>
         intermission,
         error,
         sink: EventSink::default(),
+        pending: EventSink::default(),
         buf_all: MsgBuf::default(),
         buf_multicast: MsgBuf::default(),
         buf_one: vec![MsgBuf::default(); maxclients],

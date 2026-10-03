@@ -52,6 +52,10 @@ export interface QtSimExports {
   world_serverinfo(h: number): number;
 
   world_set_cvar?(h: number, namePtr: number, nameLen: number, valuePtr: number, valueLen: number): void;
+  /** (engine extension) 1 if the world stopped on a fatal QuakeC error (text in last_error_ptr) */
+  world_stopped?(h: number): number;
+  /** (engine extension) u32 count, then count × (sound, volume, atten×64, x, y, z f32): ambientsound() calls */
+  world_ambients?(h: number): number;
 }
 
 // ---------------------------------------------------------------- EntView (20 words)
