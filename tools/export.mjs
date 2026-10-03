@@ -138,16 +138,19 @@ const wasmFile = files.find((f) => /qtsim\.wasm$/.test(f));
 const packFiles = files.filter((f) => /^packs\/.*\.(pk3|pak)$/.test(f));
 const basePack = packFiles.find((f) => /\/base-[0-9a-f]+\.pk3$/.test(f));
 
+const jsGz = sum(js, (f) => gz(siteFile(f)));
+const cssGz = sum(css, (f) => gz(siteFile(f)));
+const wasmGz = wasmFile ? gz(siteFile(wasmFile)) : 0;
 const sizeRows = [
-  ['JavaScript', sum(js, (f) => siteFile(f).length), sum(js, (f) => gz(siteFile(f))), `${js.length} file(s)`],
-  ['CSS', sum(css, (f) => siteFile(f).length), sum(css, (f) => gz(siteFile(f))), `${css.length} file(s)`],
+  ['JavaScript', sum(js, (f) => siteFile(f).length), jsGz, `${js.length} file(s)`],
+  ['CSS', sum(css, (f) => siteFile(f).length), cssGz, `${css.length} file(s)`],
   ['Fonts (woff2)', sum(fonts, (f) => siteFile(f).length), null, `${fonts.length} file(s)`],
-  ['qtsim.wasm', wasmFile ? siteFile(wasmFile).length : 0, wasmFile ? gz(siteFile(wasmFile)) : 0, wasmFile ? '' : 'MISSING'],
+  ['qtsim.wasm', wasmFile ? siteFile(wasmFile).length : 0, wasmGz, wasmFile ? '' : 'MISSING'],
   ['base pack', basePack ? siteFile(basePack).length : 0, null, basePack ?? 'MISSING'],
   ['all packs', sum(packFiles, (f) => siteFile(f).length), null, `${packFiles.length} pack(s)`],
   ['index.html', siteFile('index.html').length, gz(siteFile('index.html')), ''],
 ];
-const firstLoad = sizeRows[0][2] + sizeRows[1][2] + (sizeRows[3][2] ?? 0) + (basePack ? siteFile(basePack).length : 0);
+const firstLoad = jsGz + cssGz + wasmGz + (basePack ? siteFile(basePack).length : 0);
 const table = sizeRows.map(([what, raw, gzipped, extra]) =>
   `  ${what.padEnd(14)} ${kb(raw).padStart(10)}${gzipped === null ? ''.padStart(16) : `  ${kb(gzipped).padStart(9)} gz`}   ${extra}`).join('\n');
 
