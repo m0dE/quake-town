@@ -5,7 +5,7 @@
 /**
  * Offline stand-in for an arrr-network node (ported from vibe-strike; voice removed).
  *
- * Offline play runs at 77 Hz like the app's rooms, on a drift-corrected timer (setInterval(13) drifts and bunches).
+ * Offline play runs at the rooms' network rate (20 Hz), on a drift-corrected timer (setInterval drifts and bunches).
  *
  * It behaves like the node as far as the lockstep can observe, so offline play
  * runs exactly the same code paths as a live room: an INITIAL_STATE with no

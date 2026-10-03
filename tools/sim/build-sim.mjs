@@ -47,7 +47,7 @@ const abi = [
   'world_new', 'world_free', 'world_clone', 'world_serialize', 'world_buf_ptr', 'world_deserialize',
   'world_hash', 'world_tick_count', 'world_map',
   'world_free_slot', 'world_client_join', 'world_client_leave', 'world_client_idle', 'world_set_userinfo', 'world_client_command',
-  'world_set_cmd', 'world_tick',
+  'world_set_cmd', 'world_tick', 'world_tick_ms',
   'world_view_ents', 'world_view_client', 'world_view_clients', 'world_client_info', 'world_events', 'world_strings',
   'world_model_names', 'world_sound_names', 'world_lightstyles', 'world_serverinfo', 'world_set_cvar',
 ]

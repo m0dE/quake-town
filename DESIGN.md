@@ -73,21 +73,27 @@ compiles, kill every process you start, no `lsof` (use `ss -tlnpH 'sport = :PORT
 
 ## Tick rate and time
 
-- **Rooms tick at 77 Hz** (`applications.fps = 77`). One room frame = one sim tick =
-  one QuakeWorld frame of **msec = 13** — exactly what a QW client at the competitive
-  `cl_maxfps 77` sent (`1000/77` rounded to the integer msec QW's usercmd carries).
-  pmove runs once per tick per player with `frametime = 0.013`; entity physics
-  (`SV_Physics`) runs once per tick with `frametime = 0.013`. The 0.1 % difference
-  between 77 × 13 ms and one second is invisible; movement is identical to a 77 fps
-  QW client because the integer msec is identical.
-- Why not 60 + substeps: 1000/60 is not an integer msec, so QW's movement at 60 fps
-  is not reproducible by substepping, and the jump/friction rounding that defines
-  bunny hopping depends on msec. 77 Hz is the measured choice if the node sustains
-  it; the shell measures node tick stability at 77 Hz on the local cluster and records
-  it here. Fallback (documented, not built): 39 Hz with 2 substeps of 13 ms each.
-- Sim time: `world.time` is an f64 count of ticks × 0.013 internally; QuakeC sees it
-  as the f32 global `time`. A map change restarts time at 1.0 (QW's server did the
-  same; keeps f32 precision).
+- **The network rate and the physics rate are separate.** The app's `fps` is the network
+  frame rate: how often the node orders and broadcasts inputs. Quake Town runs at
+  **20 Hz** like the other ARRR games (`applications.fps = 20`); the client follows
+  whatever rate the node states at connect.
+- **Physics stays QuakeWorld's.** Each network frame is cut into QuakeWorld frames of at
+  most **13 ms** (`frameSteps` in `src/sim/qtsim.ts`): at 20 Hz a 50 ms frame runs
+  13 + 13 + 12 + 12 ms. QW's physics is integer-msec and slightly frame-length dependent;
+  13 ms is what a QW client at the competitive 77 fps sent, so movement (bunny hops,
+  strafe jumps, 43.8-unit jumps) is QW's, and game time is exact (the steps sum to the
+  frame). Each step runs `world_tick_ms(h, msec)`: pmove with that msec, `SV_Physics`
+  with that frametime, time advanced by it. The split is a pure function of the frame
+  number and the rate, so every client cuts identically.
+- **Input:** one cmd per network frame. Its view angles are reached across the frame's
+  steps, interpolated from the body's current view angles (read from the world, so a
+  client restored from a snapshot agrees), so turning while strafe jumping stays smooth;
+  an impulse fires on the first step only.
+- Sim time: `world.time` is 1.0 + milliseconds simulated on this map / 1000 (f64);
+  QuakeC sees the f32 global `time`. A map change restarts time at 1.0 (QW's server did
+  the same; keeps f32 precision).
+- Cost: ~0.45 ms of wasm per 20 Hz network frame (four QW steps, 16 players with bots),
+  ~9 ms of CPU per second per world stepped.
 
 ## Simulation architecture
 
@@ -100,7 +106,7 @@ ABI (no wasm-bindgen). Every client runs it in lockstep. arrr-network's predicti
 Per tick, in this order (QW's SV_Frame order, with all cmds of a tick sequenced):
 1. bots compute their usercmds (`qtbots`, reading the world through a trait);
 2. for each client slot in ascending order with a live player: `SV_RunCmd` with the
-   slot's held cmd — `PlayerPreThink`, pmove (msec 13), touch triggers via
+   slot's held cmd — `PlayerPreThink`, pmove (the step's msec, ≤ 13), touch triggers via
    `SV_TouchLinks`/pmove touch list, `SV_RunNewmis`, `PlayerPostThink`;
 3. `SV_Physics`: `StartFrame`, then every non-client edict in edict order by movetype
    (push, none, noclip, toss/bounce/fly, step), think functions at `nextthink`;
@@ -551,11 +557,9 @@ per frame).
   `timelimit` and `fraglimit`. qt_pickup weapon ids are 20 + weapon impulse.
 - `public/packs/index.json` entries also carry `file` and `title`; `players` is
   `[min, max]` (`docs/proposals/content.md`).
-- Tick-rate measurements (dev node on this 2-core box): at load 15–31 it delivered
-  72.1 Hz of 77; at load ~10, **76.3 Hz** over 12,657 ticks (interval p50 12.6 ms,
-  p99 22.2 ms, one 958 ms stall, 0 gaps) and pages received 76.8–77.5 Hz. 77 Hz stands.
-  Client cost: 276–286 µs per tick in the page (confirmed + predicted step + hash);
-  world_hash 51–81 µs, hashed every frame.
+- Earlier measurements at a 77 Hz network rate (one 13 ms step per frame): the dev node
+  delivered 72–76 Hz of 77 on this box. Superseded: the network runs at 20 Hz and each
+  frame runs several 13 ms QW steps (see "Tick rate and time").
 
 ## Process
 

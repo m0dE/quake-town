@@ -39,6 +39,7 @@ export interface QtSimExports {
 
   world_set_cmd(h: number, slot: number, pitch16: number, yaw16: number, forward: number, side: number, up: number, buttons: number, impulse: number): void;
   world_tick(h: number): void;
+  world_tick_ms(h: number, msec: number): void;
 
   world_view_ents(h: number): number;
   world_view_client(h: number, slot: number): number;

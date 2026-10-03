@@ -12,7 +12,7 @@
  * A demo plays back only on the same sim build and content (version string).
  */
 import { deflateSync, inflateSync, strToU8, strFromU8 } from 'fflate';
-import type { QtApp, QtSnapshot, QtState, SimOp } from '../sim/qtsim.js';
+import { TICK_SECONDS, type QtApp, type QtSnapshot, type QtState, type SimOp } from '../sim/qtsim.js';
 
 export interface DemoHeader {
   v: 1;
@@ -71,7 +71,7 @@ export class DemoRecorder {
   }
 
   get frames(): number { return this.ticks.length; }
-  get seconds(): number { return this.ticks.length * 0.013; }
+  get seconds(): number { return this.ticks.length * TICK_SECONDS; }
 
   stop(): DemoFile {
     this.stopped = true;

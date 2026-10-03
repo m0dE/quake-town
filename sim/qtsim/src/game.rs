@@ -100,6 +100,7 @@ impl World {
             seed: seed as u64,
             tick_count: 0,
             map_ticks: 0,
+            tick_msec: TICK_MSEC,
             time: 1.0,
             frametime: 0.0,
             maxclients,
@@ -275,36 +276,45 @@ impl World {
         }
     }
 
-    /// world_tick
+    /// world_tick: one 13 ms QuakeWorld frame
     pub fn tick(&mut self) {
+        self.tick_ms(TICK_MSEC)
+    }
+
+    /// world_tick_ms: one QuakeWorld frame of `msec` milliseconds (1..=50). A network frame
+    /// longer than 13 ms runs several of these so every physics step stays QW-sized.
+    pub fn tick_ms(&mut self, msec: u8) {
+        let msec = msec.clamp(1, 50);
         self.sv.sink = std::mem::take(&mut self.sv.pending);
         if self.stopped() {
             return;
         }
-        if let Err(e) = self.tick_inner() {
+        if let Err(e) = self.tick_inner(msec) {
             self.fail(e);
         }
         self.flush_tick_buffers();
     }
 
-    fn tick_inner(&mut self) -> Result<(), VmError> {
+    fn tick_inner(&mut self, msec: u8) -> Result<(), VmError> {
         let (vm, sv) = (&mut self.vm, &mut self.sv);
         vm.set_budget(TICK_BUDGET);
         sv.tick_count = sv.tick_count.wrapping_add(1);
-        sv.map_ticks += 1;
-        sv.time = 1.0 + sv.map_ticks as f64 * (TICK_MSEC as f64 * 0.001);
+        sv.tick_msec = msec;
+        sv.map_ticks += msec as u32;
+        sv.time = 1.0 + sv.map_ticks as f64 * 0.001;
 
         // 1. bots compute their usercmds
         sv.bots_think(vm);
         // 2. clients in slot order
         for slot in 0..sv.maxclients {
             if sv.clients[slot].spawned {
+                sv.clients[slot].cmd.msec = msec;
                 sv.client_think(vm, slot)?;
                 sv.clients[slot].cmd.impulse = 0;
             }
         }
         // 3. SV_Physics
-        sv.physics(vm, TICK_MSEC as f64 * 0.001)?;
+        sv.physics(vm, msec as f64 * 0.001)?;
         sv.end_frame_clients(vm);
 
         // 4. pending changelevel

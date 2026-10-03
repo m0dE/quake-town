@@ -169,7 +169,7 @@ mod imp {
                 };
                 let a = |s: i32| ((s as i16) as f64 * (360.0 / 65536.0)) as f32;
                 sv.clients[slot].cmd = UserCmd {
-                    msec: TICK_MSEC,
+                    msec: sv.tick_msec,
                     angles: [a(cmd.pitch16), a(cmd.yaw16), 0.0],
                     forwardmove: cmd.forward.clamp(-500, 500) as i16,
                     sidemove: cmd.side.clamp(-500, 500) as i16,

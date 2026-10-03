@@ -22,7 +22,7 @@
  */
 import { connect, lockstep, type Connection, type IdentitySession, type NetworkInput } from 'arrr-network';
 import { connectLoopback } from './loopback.js';
-import { ticksPerFrameFor, TICRATE, type QtApp, type QtState } from '../sim/qtsim.js';
+import { setNetRate, TICRATE, NET_HZ, type QtApp, type QtState } from '../sim/qtsim.js';
 import { isSimInput } from '../sim/wire.js';
 
 /** Hash (and so vote on) every Nth frame. Must be the same on every client of a room. */
@@ -136,12 +136,13 @@ export class NetSession {
     };
     const wrapped: lockstep.TransportEvents = {
       ...events,
-      // The node says its rate here, before any tick is stepped: one network
-      // frame is one QW frame (msec 13) at 77 Hz, more if the node runs slower.
+      // The node says its rate here, before any tick is stepped: every network frame is
+      // cut into QW frames of at most 13 ms (frameSteps), whatever the rate.
       onConnect: (snapshot, inputs, frame, node, fps, clientId) => {
-        app.ticksPerFrame = ticksPerFrameFor(fps > 0 ? fps : TICRATE);
+        app.netHz = fps > 0 ? fps : NET_HZ;
+        setNetRate(app.netHz);
         this.nodeFps = fps;
-        if (fps > 0 && fps !== TICRATE) console.warn(`[net] the room ticks at ${fps} Hz, not ${TICRATE}: ${app.ticksPerFrame} sim ticks per frame`);
+        if (fps > 0 && fps !== NET_HZ) console.info(`[net] the room ticks at ${fps} Hz`);
         events.onConnect(snapshot, inputs, frame, node, fps, clientId);
         seen(inputs as NetworkInput[]);
       },

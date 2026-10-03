@@ -440,6 +440,7 @@ fn read_server(r: &mut R, progs: Arc<Progs>, maps: Vec<Arc<Map>>) -> Res<Server>
         seed,
         tick_count,
         map_ticks,
+        tick_msec: crate::world::TICK_MSEC, // set at the start of every tick
         time,
         frametime,
         maxclients,

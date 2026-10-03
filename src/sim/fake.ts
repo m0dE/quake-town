@@ -412,6 +412,7 @@ export function createFakeSim(): QtSimExports {
       if (c && c.state === 1) c.cmd = [pitch, yaw, fwd, side, up, buttons, impulse];
     },
     world_tick(h) { tick(W(h)); },
+    world_tick_ms(h) { tick(W(h)); },
 
     world_view_ents(h) {
       const w = W(h);

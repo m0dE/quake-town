@@ -193,8 +193,11 @@ pub struct Server {
 
     pub seed: u64,
     pub tick_count: u32,
-    /// ticks since this map was spawned (time = 1.0 + map_ticks * 0.013)
+    /// milliseconds simulated since this map was spawned (time = 1.0 + map_ticks / 1000);
+    /// the name is historical: a tick is no longer always 13 ms
     pub map_ticks: u32,
+    /// length of the tick being run, ms (the usercmd msec of every client this tick)
+    pub tick_msec: u8,
     pub time: f64,
     /// QW host_frametime
     pub frametime: f64,

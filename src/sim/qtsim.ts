@@ -26,9 +26,31 @@ import { cleanCommand, cleanUserinfo, decodeCmd, infoGet, type UserCmd } from '.
 
 declare const __BUILD_REV__: string;
 
-/** DESIGN.md "Tick rate": rooms tick at 77 Hz, one QW frame of msec 13. */
-export const TICRATE = 77;
-export const TICK_SECONDS = 0.013;
+/**
+ * DESIGN.md "Tick rate": the room's network frame rate (the app's fps, 20 Hz by default) is
+ * not the physics rate. Each network frame runs as many QuakeWorld frames of at most 13 ms
+ * as it takes (20 Hz: 13+13+12+12 ms), the msec a QW client at ~77 fps sent, so movement
+ * is QW's and game time stays exact. TICRATE / TICK_SECONDS describe the NETWORK frame and
+ * follow the room's actual rate once connected (setNetRate).
+ */
+export const NET_HZ = 20;
+export let TICRATE = NET_HZ;
+export let TICK_SECONDS = 1 / NET_HZ;
+export function setNetRate(hz: number): void {
+  TICRATE = hz > 0 ? hz : NET_HZ;
+  TICK_SECONDS = 1 / TICRATE;
+}
+/** The longest QuakeWorld frame a network frame is cut into (QW at 77 fps). */
+export const QW_FRAME_MS = 13;
+/** The QW frames (ms each) network frame `frame` runs at `hz`: exact over time, each <= 13. */
+export function frameSteps(frame: number, hz: number): number[] {
+  const ms = Math.floor(((frame + 1) * 1000) / hz) - Math.floor((frame * 1000) / hz);
+  const n = Math.max(1, Math.ceil(ms / QW_FRAME_MS));
+  const base = Math.floor(ms / n);
+  const out: number[] = [];
+  for (let i = 0; i < n; i++) out.push(base + (i < ms - base * n ? 1 : 0));
+  return out;
+}
 
 export interface QtState {
   /** World handle in the wasm module; 0 once disposed. */
@@ -43,6 +65,8 @@ export interface QtState {
   strs: string[];
   /** Impulses applied this tick, per slot: a second cmd in one tick must not drop the first's impulse. Transient. */
   imp: number[];
+  /** cmds that arrived this frame, applied per QW step in `step` (transient: empty between frames). */
+  pend: (UserCmd | undefined)[];
 }
 
 export interface QtSnapshot { w: string; slots: string[]; names: Record<string, string> }
@@ -136,6 +160,7 @@ export class QtSim {
   tickCount(h: number): number { return this.ex.world_tick_count(h) >>> 0; }
   mapOf(h: number): number { return this.ex.world_map(h); }
   tick(h: number): void { this.ex.world_tick(h); }
+  tickMs(h: number, msec: number): void { this.ex.world_tick_ms(h, msec); }
 
   // ---------------------------------------------------------------- membership
   freeSlot(h: number): number { return this.ex.world_free_slot(h); }
@@ -235,8 +260,8 @@ export interface QtApp extends lockstep.Sim<QtState, unknown> {
   readonly version: string;
   readonly sim: QtSim;
   readonly maxclients: number;
-  /** Sim ticks per network frame: max(1, round(77 / node fps)). Set at connect, before any step. */
-  ticksPerFrame: number;
+  /** The room's network frame rate (the node's fps). Set at connect, before any step. */
+  netHz: number;
   slotOf(s: QtState, id: string): number;
   /** Counters for tests: how often prediction took the clone path vs the byte path. */
   readonly stats: { clones: number; decodes: number; encodes: number; steps: number; stepMs: number };
@@ -258,9 +283,6 @@ export type SimOp =
 /** The room namespace suffix (DESIGN "Room config": `qt1.<cfg>-quaketown`). */
 export const APP_NAME = 'quaketown';
 
-export function ticksPerFrameFor(fps: number): number {
-  return Math.max(1, Math.round(TICRATE / Math.max(1, fps)));
-}
 
 export const DEFAULT_USERINFO = '\\name\\player\\team\\\\topcolor\\0\\bottomcolor\\0';
 
@@ -298,7 +320,7 @@ export function createQtApp(sim: QtSim, opts: QtAppOptions): QtApp {
     version: `qtsim-${sim.version}+${packTag || 'nopacks'}+${rev}`,
     sim,
     maxclients,
-    ticksPerFrame: 1,
+    netHz: NET_HZ,
     stats,
     slotOf,
     tap: null,
@@ -306,7 +328,7 @@ export function createQtApp(sim: QtSim, opts: QtAppOptions): QtApp {
     init(ctx) {
       const h = sim.newWorld(opts.progsId, opts.mapId, ctx.seed, opts.serverinfo);
       // Everyone starts as a spectator (DESIGN "Membership"): the roster needs nothing here.
-      return { h, slots: new Array<string>(maxclients).fill(''), names: {}, ev: EMPTY, strs: NO_STRINGS, imp: [] };
+      return { h, slots: new Array<string>(maxclients).fill(''), names: {}, ev: EMPTY, strs: NO_STRINGS, imp: [], pend: [] };
     },
 
     addPlayer(s, id) {
@@ -340,7 +362,7 @@ export function createQtApp(sim: QtSim, opts: QtAppOptions): QtApp {
         // Last cmd wins, but an impulse already delivered this tick is kept.
         if (!cmd.impulse && s.imp[slot]) cmd.impulse = s.imp[slot];
         else if (cmd.impulse) s.imp[slot] = cmd.impulse;
-        sim.setCmd(s.h, slot, cmd);
+        s.pend[slot] = cmd;
         return;
       }
       if (d.j === 1) { join(s, sender); return; }
@@ -368,33 +390,57 @@ export function createQtApp(sim: QtSim, opts: QtAppOptions): QtApp {
       app.tap?.(s, ['s', ctx?.frame ?? 0]);
       const t0 = now();
       if (s.imp.length) s.imp.length = 0;
-      const n = app.ticksPerFrame;
-      if (n === 1) {
-        sim.tick(s.h);
-        const e = sim.events(s.h);
-        s.ev = e.ev; s.strs = e.strs;
-      } else {
-        // Several sim ticks per frame (a node slower than 77 Hz): concatenate the
-        // events, re-basing string indices so they stay unique.
-        const parts: Int32Array[] = [];
-        const strs: string[] = [];
-        let len = 0;
-        for (let i = 0; i < n; i++) {
-          sim.tick(s.h);
-          const e = sim.events(s.h);
-          if (e.ev.length) {
-            const ev = e.ev.slice();
-            const base = strs.length;
-            for (let k = 0; k < ev.length; k += EVENT_WORDS) {
-              const kind = ev[k];
-              if (kind === EV_PRINT) ev[k + 3] += base;
-              else if (kind === EV_CENTER || kind === EV_STUFF || kind === EV_LIGHTSTYLE) ev[k + 2] += base;
-            }
-            strs.push(...e.strs);
-            parts.push(ev);
-            len += ev.length;
-          }
+      const steps = frameSteps(ctx?.frame ?? 0, app.netHz);
+      // The view angles a cmd carries are reached over the frame's QW steps, from where the
+      // body looks now (read from the world, so a client restored from a snapshot agrees):
+      // strafe-jump turning stays smooth at a 20 Hz network rate.
+      const from: (number[] | undefined)[] = [];
+      for (let slot = 0; slot < s.pend.length; slot++) {
+        if (!s.pend[slot] || steps.length === 1) continue;
+        const cv = sim.client(s.h, slot);
+        const f = new Float32Array(cv.buffer, cv.byteOffset + CV.vAngle * 4, 2);
+        from[slot] = [Math.round(f[0] * 65536 / 360), Math.round(f[1] * 65536 / 360)];
+      }
+      const short = (a: number): number => ((((a + 32768) % 65536) + 65536) % 65536) - 32768;
+      const parts: Int32Array[] = [];
+      const strs: string[] = [];
+      let len = 0;
+      for (let i = 0; i < steps.length; i++) {
+        for (let slot = 0; slot < s.pend.length; slot++) {
+          const c = s.pend[slot];
+          if (!c) continue;
+          const a = from[slot];
+          if (!a) { if (i === 0) sim.setCmd(s.h, slot, c); continue; }
+          const k = (i + 1) / steps.length;
+          const dp = short(c.pitch - a[0]);
+          const dy = short(c.yaw - a[1]);
+          sim.setCmd(s.h, slot, {
+            ...c,
+            pitch: short(a[0] + Math.round(dp * k)),
+            yaw: short(a[1] + Math.round(dy * k)),
+            impulse: i === 0 ? c.impulse : 0,
+          });
         }
+        sim.tickMs(s.h, steps[i]);
+        const e = sim.events(s.h);
+        if (steps.length === 1) { parts.push(e.ev); strs.push(...e.strs); len += e.ev.length; break; }
+        if (e.ev.length) {
+          // concatenate the steps' events, re-basing string indices so they stay unique
+          const ev = e.ev.slice();
+          const base = strs.length;
+          for (let k = 0; k < ev.length; k += EVENT_WORDS) {
+            const kind = ev[k];
+            if (kind === EV_PRINT) ev[k + 3] += base;
+            else if (kind === EV_CENTER || kind === EV_STUFF || kind === EV_LIGHTSTYLE) ev[k + 2] += base;
+          }
+          strs.push(...e.strs);
+          parts.push(ev);
+          len += ev.length;
+        }
+      }
+      s.pend.length = 0;
+      if (parts.length === 1) { s.ev = parts[0]; s.strs = strs; }
+      else {
         const ev = new Int32Array(len);
         let at = 0;
         for (const p of parts) { ev.set(p, at); at += p.length; }
@@ -463,7 +509,7 @@ export function createQtApp(sim: QtSim, opts: QtAppOptions): QtApp {
         stats.decodes++;
         h = sim.deserialize(fromBase64(snap.w));
       }
-      return { h, slots, names, ev: EMPTY, strs: NO_STRINGS, imp: [] };
+      return { h, slots, names, ev: EMPTY, strs: NO_STRINGS, imp: [], pend: [] };
     },
 
     dispose(s) {

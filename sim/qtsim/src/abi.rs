@@ -378,6 +378,16 @@ pub extern "C" fn world_tick(h: u32) {
     })
 }
 
+/// One QuakeWorld frame of `msec` ms (clamped to 1..=50): pmove, physics and time all use it.
+#[no_mangle]
+pub extern "C" fn world_tick_ms(h: u32, msec: u32) {
+    with(|s| {
+        if let Some(sl) = slot(s, h) {
+            sl.world.tick_ms(msec.min(255) as u8)
+        }
+    })
+}
+
 // ---------------------------------------------------------------- views
 
 fn words_view(h: u32, f: impl FnOnce(&World, &mut Vec<u32>)) -> *const u32 {
