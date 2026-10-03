@@ -7,6 +7,8 @@ try { rev = execSync('git rev-parse --short HEAD').toString().trim(); } catch { 
 export default defineConfig({
   base: './',
   define: { __BUILD_REV__: JSON.stringify(rev) },
-  server: { port: 5191 },
+  // RunHQ serves branch previews on *.tank.fish through a tunnel; Vite refuses unknown hosts.
+  server: { port: 5191, allowedHosts: ['.tank.fish', 'localhost', '127.0.0.1'] },
+  preview: { port: 5191, allowedHosts: ['.tank.fish', 'localhost', '127.0.0.1'] },
   build: { target: 'es2022', assetsInlineLimit: 0, chunkSizeWarningLimit: 2000 },
 });

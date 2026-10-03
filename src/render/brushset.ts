@@ -28,6 +28,8 @@ export interface WorldUniforms {
   uSkyEmissive: THREE.IUniform<number>;
   uWarpLight: THREE.IUniform<number>;
   uAlpha: THREE.IUniform<number>;
+  uOpaque: THREE.IUniform<number>;
+  uOutScale: THREE.IUniform<number>;
 }
 
 export class BrushSet {
@@ -36,8 +38,14 @@ export class BrushSet {
   readonly wtex: WorldTextures;
   readonly lmTex: THREE.DataTexture[];
   readonly geometry: THREE.BufferGeometry;
-  /** per batch: the material in use (warp swaps between opaque/translucent) */
+  /** per batch: the material in use, with dynamic lights (warp swaps opaque/translucent) */
   readonly materials: THREE.RawShaderMaterial[] = [];
+  /**
+   * The world mesh's material array: [0, nb) plain variants (no dlight loop), [nb, 2nb) the
+   * dlight variants — WorldGeometry.cull() splits each batch into those two ranges.
+   */
+  readonly worldMaterials: THREE.RawShaderMaterial[] = [];
+  private plain: THREE.RawShaderMaterial[] = [];
   readonly warpOpaque: (THREE.RawShaderMaterial | null)[] = [];
   readonly warpTrans: (THREE.RawShaderMaterial | null)[] = [];
   /** per model: materials per group (own copies where the texture animates) */
@@ -69,7 +77,10 @@ export class BrushSet {
       this.warpOpaque.push(b.kind === 'warp' ? m : null);
       this.warpTrans.push(b.kind === 'warp' ? this.batchMaterial('warp', b.tex, 0, true) : null);
       this.materials.push(m);
+      this.plain.push(b.kind === 'lm' || b.kind === 'cutout' ? this.batchMaterial(b.kind, b.tex, b.page, false, false) : m);
     }
+    for (let b = 0; b < geom.batches.length; b++) this.worldMaterials.push(this.plain[b]);
+    for (let b = 0; b < geom.batches.length; b++) this.worldMaterials.push(this.materials[b]);
     for (let i = 0; i < bsp.models.length; i++) { this.modelMats.push([]); this.modelGeo.push(null); }
   }
 
@@ -101,10 +112,10 @@ export class BrushSet {
     return mesh;
   }
 
-  private batchMaterial(kind: string, tex: number, page: number, translucent: boolean): THREE.RawShaderMaterial {
+  private batchMaterial(kind: string, tex: number, page: number, translucent: boolean, dlights = true): THREE.RawShaderMaterial {
     const su = this.su, wtex = this.wtex;
     const texSize = new THREE.Vector2(tex >= 0 ? wtex.size[tex * 2] || 64 : 64, tex >= 0 ? wtex.size[tex * 2 + 1] || 64 : 64);
-    const common = { uStyles: su.uStyles, uTexSize: { value: texSize }, uCam: su.uCam, uFog: su.uFog, uTime: su.uTime };
+    const common = { uStyles: su.uStyles, uTexSize: { value: texSize }, uCam: su.uCam, uFog: su.uFog, uTime: su.uTime, uOpaque: su.uOpaque, uOutScale: su.uOutScale };
     if (kind === 'sky') {
       return new THREE.RawShaderMaterial({
         vertexShader: WORLD_VS, fragmentShader: SKY_FS, glslVersion: THREE.GLSL3,
@@ -133,7 +144,7 @@ export class BrushSet {
     }
     return new THREE.RawShaderMaterial({
       vertexShader: WORLD_VS, fragmentShader: WORLD_FS, glslVersion: THREE.GLSL3,
-      defines: kind === 'cutout' ? { CUTOUT: 1 } : {},
+      defines: { ...(kind === 'cutout' ? { CUTOUT: 1 } : {}), ...(dlights ? { DLIGHTS: 1 } : {}) },
       uniforms: {
         ...common, uTex: { value: (tex >= 0 && wtex.tex[tex]) || wtex.missing }, uLM: { value: this.lmTex[page] ?? this.lmTex[0] },
         uOverbright: su.uOverbright, uFullbright: this.fullbright, uEmissive: su.uEmissive, uLightClamp: su.uLightClamp,
@@ -153,14 +164,16 @@ export class BrushSet {
         // only water and slime turn translucent (lava and teleporters stay solid, as in QS)
         const clear = waterAlpha < 1 && !name.includes('lava') && !name.includes('tele');
         const want = clear ? this.warpTrans[b]! : this.warpOpaque[b]!;
-        if (this.materials[b] !== want) this.materials[b] = want;
+        if (this.materials[b] !== want) { this.materials[b] = want; this.worldMaterials[b] = want; this.worldMaterials[g.batches.length + b] = want; }
         want.uniforms.uEmissive.value = bloom ? (name.includes('lava') ? 0.7 : name.includes('tele') ? 0.4 : name.includes('slime') ? 0.25 : 0.03) : 0;
         continue;
       }
       if (bt.tex < 0) continue;
       const chain = g.tex.anims[bt.tex];
       if (!chain) continue;
-      this.materials[b].uniforms.uTex.value = this.wtex.tex[chain[tick % chain.length]] ?? this.wtex.missing;
+      const t = this.wtex.tex[chain[tick % chain.length]] ?? this.wtex.missing;
+      this.materials[b].uniforms.uTex.value = t;
+      this.plain[b].uniforms.uTex.value = t;
     }
   }
 
@@ -189,7 +202,7 @@ export class BrushSet {
   dispose(): void {
     this.geometry.dispose();
     for (const g of this.modelGeo) g?.dispose();
-    const mats = new Set<THREE.Material>([...this.materials, ...this.extraMats]);
+    const mats = new Set<THREE.Material>([...this.materials, ...this.plain, ...this.extraMats]);
     for (const x of this.warpOpaque) if (x) mats.add(x);
     for (const x of this.warpTrans) if (x) mats.add(x);
     for (const x of mats) x.dispose();

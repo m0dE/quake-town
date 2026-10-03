@@ -65,7 +65,7 @@ export async function buildMapsQt({ fast = false, only = null } = {}) {
   await fetchAll();
   const { compileMap, MAPS_OUT } = await import('./compile-map.mjs');
   const libFiles = readdirSync(join(ROOT, 'content/maps/lib')).map((f) => join(ROOT, 'content/maps/lib', f));
-  const toolFiles = ['compile-map.mjs', 'check-map.mjs', 'lib/bsp.mjs'].map((f) => join(ROOT, 'tools/content', f));
+  const toolFiles = ['compile-map.mjs', 'check-map.mjs', 'lib/bsp.mjs', 'lib/reach.mjs'].map((f) => join(ROOT, 'tools/content', f));
   const pin = readFileSync(join(CACHE, 'fetch.stamp.json'), 'utf8');
   const results = [];
   mkdirSync(BUILD_DIR, { recursive: true });

@@ -109,6 +109,8 @@ export interface AliasSharedUniforms {
   uDlCol: THREE.IUniform<THREE.Vector4[]>;
   uFog: THREE.IUniform<THREE.Vector4>;
   uCam: THREE.IUniform<THREE.Vector3>;
+  uOpaque: THREE.IUniform<number>;
+  uOutScale: THREE.IUniform<number>;
 }
 
 export function aliasMaterial(shared: AliasShared, su: AliasSharedUniforms, translucent: boolean): THREE.RawShaderMaterial {

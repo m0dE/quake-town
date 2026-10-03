@@ -67,6 +67,7 @@ uniform float uEmissive;     // bloom weight of fullbright texels
 uniform float uLightClamp;   // max light factor (classic 2.0, modern large)
 uniform vec4 uFlat;          // r_drawflat: x = on
 uniform vec3 uCam;
+uniform float uOpaque;      // 1: drawing straight to the canvas (alpha = 1), 0: alpha = bloom weight
 ${DLIGHT_DECL}
 ${FOG_DECL}
 in vec2 vUV;
@@ -76,6 +77,7 @@ in float vStep;
 in vec4 vStyle;
 in vec3 vWorld;
 in vec3 vNormal;
+uniform float uOutScale;   // 0.5 into the 8-bit HDR target (range 0..2), 1 to the canvas
 layout(location = 0) out vec4 outColor;
 void main() {
   vec4 t = texture(uTex, vUV);
@@ -91,6 +93,8 @@ void main() {
   if (vStyle.y > 0.0) light += texture(uLM, vLM + vec2(vStep, 0.0)).rgb * vStyle.y;
   if (vStyle.z > 0.0) light += texture(uLM, vLM + vec2(vStep * 2.0, 0.0)).rgb * vStyle.z;
   if (vStyle.w > 0.0) light += texture(uLM, vLM + vec2(vStep * 3.0, 0.0)).rgb * vStyle.w;
+#ifdef DLIGHTS
+  // only faces a light reaches are drawn with this variant (WorldGeometry.cull)
   vec3 n = normalize(vNormal);
   for (int i = 0; i < ${MAX_DLIGHTS}; i++) {
     if (i >= uNumDl) break;
@@ -102,11 +106,12 @@ void main() {
     float a = rad - ip;
     if (a > 0.0) light += uDlCol[i].rgb * (a * (1.0 / 255.0));
   }
+#endif
   light = min(light * uOverbright, vec3(uLightClamp));
   light = mix(light, vec3(1.0), uFullbright);
   vec3 c = t.rgb * mix(vec3(1.0), light, t.a);
   c = applyFog(c, length(vWorld - uCam));
-  outColor = vec4(c, (1.0 - t.a) * uEmissive);
+  outColor = vec4(c * uOutScale, max((1.0 - t.a) * uEmissive, uOpaque));
 }
 `;
 
@@ -118,6 +123,7 @@ uniform sampler2D uSkyFront;
 uniform float uTime;
 uniform vec3 uCam;
 uniform float uSkyEmissive;
+uniform float uOpaque;
 uniform vec4 uFog;
 in vec2 vUV;
 in vec2 vST;
@@ -126,6 +132,7 @@ in float vStep;
 in vec4 vStyle;
 in vec3 vWorld;
 in vec3 vNormal;
+uniform float uOutScale;   // 0.5 into the 8-bit HDR target (range 0..2), 1 to the canvas
 layout(location = 0) out vec4 outColor;
 void main() {
   vec3 dir = vWorld - uCam;
@@ -138,7 +145,7 @@ void main() {
   vec4 f = texture(uSkyFront, front);
   vec3 c = mix(b, f.rgb, f.a);
   if (uFog.w > 0.0) c = mix(c, uFog.rgb, 0.35);
-  outColor = vec4(c, uSkyEmissive);
+  outColor = vec4(c * uOutScale, max(uSkyEmissive, uOpaque));
 }
 `;
 
@@ -151,6 +158,7 @@ uniform float uTime;
 uniform float uAlpha;
 uniform float uEmissive;
 uniform float uWarpLight; // brightness of liquids (Quake draws them unlit at 1.0)
+uniform float uOpaque;
 uniform vec3 uCam;
 ${FOG_DECL}
 in vec2 vUV;
@@ -160,6 +168,7 @@ in float vStep;
 in vec4 vStyle;
 in vec3 vWorld;
 in vec3 vNormal;
+uniform float uOutScale;   // 0.5 into the 8-bit HDR target (range 0..2), 1 to the canvas
 layout(location = 0) out vec4 outColor;
 void main() {
   vec2 st = vST;
@@ -167,9 +176,9 @@ void main() {
   vec3 c = texture(uTex, uv).rgb * uWarpLight;
   c = applyFog(c, length(vWorld - uCam));
 #ifdef TRANSLUCENT
-  outColor = vec4(c, uAlpha);
+  outColor = vec4(c * uOutScale, uAlpha);
 #else
-  outColor = vec4(c, uEmissive);
+  outColor = vec4(c * uOutScale, max(uEmissive, uOpaque));
 #endif
 }
 `;
@@ -245,11 +254,13 @@ uniform float uEmissive;
 uniform float uRim;        // modern rim light strength
 uniform vec3 uCam;
 uniform vec3 uShell;       // quad/pent shell tint (0 = none)
+uniform float uOpaque;
 ${FOG_DECL}
 in vec2 vUV;
 in vec3 vLight;
 in vec3 vWorld;
 in vec3 vNormal;
+uniform float uOutScale;   // 0.5 into the 8-bit HDR target (range 0..2), 1 to the canvas
 layout(location = 0) out vec4 outColor;
 void main() {
   vec4 t = texture(uSkin, vUV);
@@ -262,9 +273,9 @@ void main() {
   c = applyFog(c, length(vWorld - uCam));
   float e = (1.0 - t.a) * uEmissive + dot(uShell, vec3(0.3)) * rim;
 #ifdef TRANSLUCENT
-  outColor = vec4(c, uAlpha);
+  outColor = vec4(c * uOutScale, uAlpha);
 #else
-  outColor = vec4(c, e);
+  outColor = vec4(c * uOutScale, max(e, uOpaque));
 #endif
 }
 `;
@@ -299,13 +310,15 @@ export const SPRITE_FS = /* glsl */ `
 precision highp float;
 uniform sampler2D uAtlas;
 uniform float uEmissive;
+uniform float uOpaque;
 in vec2 vUV;
 in vec4 vColor;
+uniform float uOutScale;   // 0.5 into the 8-bit HDR target (range 0..2), 1 to the canvas
 layout(location = 0) out vec4 outColor;
 void main() {
   vec4 t = texture(uAtlas, vUV);
   if (t.a < 0.5) discard;
-  outColor = vec4(t.rgb * vColor.rgb, uEmissive * vColor.a);
+  outColor = vec4(t.rgb * vColor.rgb * uOutScale, max(uEmissive * vColor.a, uOpaque));
 }
 `;
 
@@ -341,12 +354,13 @@ precision highp float;
 uniform float uRound;      // 1 = soft round dots, 0 = square
 in vec2 vC;
 in vec4 vColor;
+uniform float uOutScale;   // 0.5 into the 8-bit HDR target (range 0..2), 1 to the canvas
 layout(location = 0) out vec4 outColor;
 void main() {
   float r = dot(vC, vC);
   float a = uRound > 0.5 ? smoothstep(1.0, 0.35, r) : 1.0;
   if (a < 0.02) discard;
-  outColor = vec4(vColor.rgb, vColor.a * a);
+  outColor = vec4(vColor.rgb * uOutScale, vColor.a * a);
 }
 `;
 
@@ -377,8 +391,9 @@ void main() {
 export const GLOW_FS = /* glsl */ `
 precision highp float;
 in vec4 vColor;
+uniform float uOutScale;   // 0.5 into the 8-bit HDR target (range 0..2), 1 to the canvas
 layout(location = 0) out vec4 outColor;
-void main() { outColor = vColor; }
+void main() { outColor = vec4(vColor.rgb * uOutScale, vColor.a); }
 `;
 
 // ------------------------------------------------------------------------------ post
@@ -400,8 +415,10 @@ uniform vec2 uTexel;
 uniform float uThreshold;
 in vec2 vUV;
 layout(location = 0) out vec4 outColor;
+uniform float uInScale;
 vec3 pick(vec2 uv) {
   vec4 c = texture(uSrc, uv);
+  c.rgb *= uInScale;
   float l = max(c.r, max(c.g, c.b));
   return c.rgb * clamp(c.a, 0.0, 1.0) + c.rgb * max(l - uThreshold, 0.0) / max(l, 1e-4);
 }
@@ -487,11 +504,18 @@ void main() {
 }
 `;
 
+/**
+ * Composite: (FXAA on the scene, fused here to save a full-screen pass) + SSAO + bloom,
+ * tone map (ACES on the highlights, identity toe), view blend, gamma, underwater warp.
+ * Gamma 2.2 is approximated by square / square root (cheap on software GL).
+ */
 export const COMPOSITE_FS = /* glsl */ `
 precision highp float;
 uniform sampler2D uScene;
 uniform sampler2D uBloom;
 uniform sampler2D uAO;
+uniform vec2 uTexel;
+uniform float uFxaa;
 uniform float uBloomStrength;
 uniform float uAOOn;
 uniform float uAces;
@@ -506,53 +530,45 @@ vec3 aces(vec3 x) {
   // Narkowicz 2015 fit of the ACES RRT+ODT
   return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
 }
+uniform float uInScale;   // undo the scene target's 0.5 storage scale
+float luma(vec3 c) { return dot(min(c * uInScale, vec3(1.0)), vec3(0.299, 0.587, 0.114)); }
+vec3 fxaa(vec2 uv) {
+  vec3 rgbM = texture(uScene, uv).rgb;
+  float lM = luma(rgbM);
+  float lNW = luma(texture(uScene, uv + vec2(-1.0, -1.0) * uTexel).rgb), lNE = luma(texture(uScene, uv + vec2(1.0, -1.0) * uTexel).rgb);
+  float lSW = luma(texture(uScene, uv + vec2(-1.0, 1.0) * uTexel).rgb), lSE = luma(texture(uScene, uv + vec2(1.0, 1.0) * uTexel).rgb);
+  float lMin = min(lM, min(min(lNW, lNE), min(lSW, lSE)));
+  float lMax = max(lM, max(max(lNW, lNE), max(lSW, lSE)));
+  if (lMax - lMin < max(0.0312, lMax * 0.125)) return rgbM;
+  vec2 dir = vec2(-((lNW + lNE) - (lSW + lSE)), ((lNW + lSW) - (lNE + lSE)));
+  float red = max((lNW + lNE + lSW + lSE) * 0.03125, 1.0 / 128.0);
+  float rcp = 1.0 / (min(abs(dir.x), abs(dir.y)) + red);
+  dir = clamp(dir * rcp, -8.0, 8.0) * uTexel;
+  vec3 a = 0.5 * (texture(uScene, uv + dir * (1.0 / 3.0 - 0.5)).rgb + texture(uScene, uv + dir * (2.0 / 3.0 - 0.5)).rgb);
+  vec3 b = a * 0.5 + 0.25 * (texture(uScene, uv - dir * 0.5).rgb + texture(uScene, uv + dir * 0.5).rgb);
+  float lB = luma(b);
+  return (lB < lMin || lB > lMax) ? a : b;
+}
 void main() {
   vec2 uv = vUV;
   if (uWarp > 0.0) {
     uv += uWarp * vec2(sin(uv.y * 18.0 + uTime * 2.3), cos(uv.x * 14.0 + uTime * 1.9)) * 0.004;
   }
-  vec3 c = texture(uScene, uv).rgb;
+  vec3 c = (uFxaa > 0.5 ? fxaa(uv) : texture(uScene, uv).rgb) * uInScale;
   if (uAOOn > 0.5) c *= texture(uAO, uv).r;
   c += texture(uBloom, uv).rgb * uBloomStrength;
   if (uAces > 0.5) {
     // ACES on the highlights; below the knee the curve blends back to identity so Quake's
     // dark corners keep their detail (plain ACES has a slope of ~0.2 at black).
-    vec3 lin = pow(max(c, 0.0), vec3(2.2)) * uExposure;
+    vec3 lin = max(c, 0.0); lin = lin * lin * uExposure;
     vec3 w = smoothstep(vec3(0.0), vec3(0.6), lin);
-    c = pow(mix(lin, aces(lin), w), vec3(1.0 / 2.2));
+    c = sqrt(mix(lin, aces(lin), w));
   } else {
     c = clamp(c * uExposure, 0.0, 1.0);
   }
   c = mix(c, uBlend.rgb, uBlend.a);
   if (uGamma != 1.0) c = pow(c, vec3(1.0 / uGamma));
-  outColor = vec4(c, dot(c, vec3(0.299, 0.587, 0.114)));
-}
-`;
-
-/** FXAA 3.11 "quality 10"-style, compact (luma in alpha from the composite). */
-export const FXAA_FS = /* glsl */ `
-precision highp float;
-uniform sampler2D uSrc;
-uniform vec2 uTexel;
-in vec2 vUV;
-layout(location = 0) out vec4 outColor;
-float L(vec2 uv) { return texture(uSrc, uv).a; }
-void main() {
-  vec3 rgbM = texture(uSrc, vUV).rgb;
-  float lM = L(vUV);
-  float lNW = L(vUV + vec2(-1.0, -1.0) * uTexel), lNE = L(vUV + vec2(1.0, -1.0) * uTexel);
-  float lSW = L(vUV + vec2(-1.0, 1.0) * uTexel), lSE = L(vUV + vec2(1.0, 1.0) * uTexel);
-  float lMin = min(lM, min(min(lNW, lNE), min(lSW, lSE)));
-  float lMax = max(lM, max(max(lNW, lNE), max(lSW, lSE)));
-  if (lMax - lMin < max(0.0312, lMax * 0.125)) { outColor = vec4(rgbM, 1.0); return; }
-  vec2 dir = vec2(-((lNW + lNE) - (lSW + lSE)), ((lNW + lSW) - (lNE + lSE)));
-  float red = max((lNW + lNE + lSW + lSE) * 0.03125, 1.0 / 128.0);
-  float rcp = 1.0 / (min(abs(dir.x), abs(dir.y)) + red);
-  dir = clamp(dir * rcp, -8.0, 8.0) * uTexel;
-  vec3 a = 0.5 * (texture(uSrc, vUV + dir * (1.0 / 3.0 - 0.5)).rgb + texture(uSrc, vUV + dir * (2.0 / 3.0 - 0.5)).rgb);
-  vec3 b = a * 0.5 + 0.25 * (texture(uSrc, vUV - dir * 0.5).rgb + texture(uSrc, vUV + dir * 0.5).rgb);
-  float lB = dot(b, vec3(0.299, 0.587, 0.114));
-  outColor = vec4((lB < lMin || lB > lMax) ? a : b, 1.0);
+  outColor = vec4(c, 1.0);
 }
 `;
 

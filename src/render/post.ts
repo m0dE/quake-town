@@ -4,10 +4,13 @@
 // Copyright (C) 2026 Quake Town contributors. GPL-2.0-or-later.
 import * as THREE from 'three';
 import {
-  BLEND_FS, BLOOM_DOWN_FS, BLOOM_EXTRACT_FS, BLOOM_UP_FS, COMPOSITE_FS, FULLSCREEN_VS, FXAA_FS, SSAO_FS,
+  BLEND_FS, BLOOM_DOWN_FS, BLOOM_EXTRACT_FS, BLOOM_UP_FS, COMPOSITE_FS, FULLSCREEN_VS, SSAO_FS,
 } from './shaders';
 
-const LEVELS = 5;
+/** the scene target stores colour × SCENE_SCALE */
+export const SCENE_SCALE = 0.5;
+/** bloom mip chain: quarter resolution down to 1/32 */
+const LEVELS = 4;
 
 function rt(w: number, h: number, type: THREE.TextureDataType, depth: boolean, samples = 0): THREE.WebGLRenderTarget {
   return new THREE.WebGLRenderTarget(w, h, {
@@ -37,7 +40,6 @@ export interface PostOptions {
 
 export class PostFX {
   scene: THREE.WebGLRenderTarget;
-  private ldr: THREE.WebGLRenderTarget;
   private ao: THREE.WebGLRenderTarget;
   private down: THREE.WebGLRenderTarget[] = [];
   private up: THREE.WebGLRenderTarget[] = [];
@@ -48,7 +50,6 @@ export class PostFX {
   private downM: THREE.RawShaderMaterial;
   private upM: THREE.RawShaderMaterial;
   private ssaoM: THREE.RawShaderMaterial;
-  private fxaaM: THREE.RawShaderMaterial;
   readonly composite: THREE.RawShaderMaterial;
   readonly blendM: THREE.RawShaderMaterial;
   private w = 0;
@@ -57,22 +58,23 @@ export class PostFX {
   private depthTex = false;
 
   constructor() {
-    this.scene = rt(1, 1, THREE.HalfFloatType, true);
-    this.ldr = rt(1, 1, THREE.UnsignedByteType, false);
+    // 8-bit scene target holding colour × 0.5 (range 0..2, like GLQuake's overbright
+    // lightmaps): a half-float target costs ~40 % more per pass on software GL
+    this.scene = rt(1, 1, THREE.UnsignedByteType, true);
     this.ao = rt(1, 1, THREE.UnsignedByteType, false);
     for (let i = 0; i < LEVELS; i++) {
       this.down.push(rt(1, 1, THREE.HalfFloatType, false));
       this.up.push(rt(1, 1, THREE.HalfFloatType, false));
     }
-    this.extract = pass(BLOOM_EXTRACT_FS, { uSrc: { value: null }, uTexel: { value: new THREE.Vector2() }, uThreshold: { value: 1.0 } });
+    this.extract = pass(BLOOM_EXTRACT_FS, { uSrc: { value: null }, uTexel: { value: new THREE.Vector2() }, uThreshold: { value: 1.0 }, uInScale: { value: 2 } });
     this.downM = pass(BLOOM_DOWN_FS, { uSrc: { value: null }, uTexel: { value: new THREE.Vector2() } });
     this.upM = pass(BLOOM_UP_FS, { uSrc: { value: null }, uBase: { value: null }, uTexel: { value: new THREE.Vector2() } });
     this.ssaoM = pass(SSAO_FS, {
       uDepth: { value: null }, uTexel: { value: new THREE.Vector2() }, uProj: { value: new THREE.Vector4() }, uRadius: { value: 24 },
     });
-    this.fxaaM = pass(FXAA_FS, { uSrc: { value: this.ldr.texture }, uTexel: { value: new THREE.Vector2() } });
     this.composite = pass(COMPOSITE_FS, {
       uScene: { value: this.scene.texture }, uBloom: { value: null }, uAO: { value: null }, uBloomStrength: { value: 0 },
+      uTexel: { value: new THREE.Vector2() }, uFxaa: { value: 0 }, uInScale: { value: 2 },
       uAOOn: { value: 0 }, uAces: { value: 0 }, uExposure: { value: 1 }, uGamma: { value: 1 }, uBlend: { value: new THREE.Vector4() },
       uWarp: { value: 0 }, uTime: { value: 0 },
     });
@@ -90,7 +92,7 @@ export class PostFX {
     if (w === this.w && h === this.h && samples === this.samples && depthTexture === this.depthTex) return;
     if (samples !== this.samples || depthTexture !== this.depthTex) {
       this.scene.dispose();
-      this.scene = rt(w, h, THREE.HalfFloatType, true, samples);
+      this.scene = rt(w, h, THREE.UnsignedByteType, true, samples);
       if (depthTexture) {
         this.scene.depthTexture = new THREE.DepthTexture(w, h);
         this.scene.depthTexture.type = THREE.UnsignedIntType;
@@ -100,9 +102,8 @@ export class PostFX {
     }
     this.w = w; this.h = h;
     this.scene.setSize(w, h);
-    this.ldr.setSize(w, h);
     this.ao.setSize(Math.max(1, w >> 1), Math.max(1, h >> 1));
-    let lw = w, lh = h;
+    let lw = Math.max(1, w >> 1), lh = Math.max(1, h >> 1);
     for (let i = 0; i < LEVELS; i++) {
       lw = Math.max(1, lw >> 1); lh = Math.max(1, lh >> 1);
       this.down[i].setSize(lw, lh);
@@ -129,7 +130,8 @@ export class PostFX {
     const u = this.composite.uniforms;
     if (bloom) {
       this.extract.uniforms.uSrc.value = this.scene.texture;
-      (this.extract.uniforms.uTexel.value as THREE.Vector2).set(1 / this.w, 1 / this.h);
+      // quarter-resolution extract: 4 bilinear taps cover the 4×4 source pixels
+      (this.extract.uniforms.uTexel.value as THREE.Vector2).set(2 / this.w, 2 / this.h);
       this.run(r, this.extract, this.down[0]);
       for (let i = 1; i < LEVELS; i++) {
         const src = this.down[i - 1];
@@ -169,19 +171,21 @@ export class PostFX {
     u.uWarp.value = warp;
     u.uTime.value = time;
     (u.uBlend.value as THREE.Vector4).set(blend[0], blend[1], blend[2], blend[3]);
-    if (o.fxaa) {
-      this.run(r, this.composite, this.ldr);
-      (this.fxaaM.uniforms.uTexel.value as THREE.Vector2).set(1 / this.w, 1 / this.h);
-      this.run(r, this.fxaaM, null);
-    } else {
-      this.run(r, this.composite, null);
-    }
+    // FXAA runs inside the composite (one full-screen pass less)
+    u.uFxaa.value = o.fxaa ? 1 : 0;
+    (u.uTexel.value as THREE.Vector2).set(1 / this.w, 1 / this.h);
+    this.run(r, this.composite, null);
+  }
+
+  /** every pass material (for shader warm-up) */
+  materials(): THREE.RawShaderMaterial[] {
+    return [this.extract, this.downM, this.upM, this.composite, this.ssaoM, this.blendM];
   }
 
   dispose(): void {
-    this.scene.dispose(); this.ldr.dispose(); this.ao.dispose();
+    this.scene.dispose(); this.ao.dispose();
     for (const t of [...this.down, ...this.up]) t.dispose();
-    for (const m of [this.extract, this.downM, this.upM, this.composite, this.ssaoM, this.fxaaM, this.blendM]) m.dispose();
+    for (const m of [this.extract, this.downM, this.upM, this.composite, this.ssaoM, this.blendM]) m.dispose();
     this.quad.geometry.dispose();
   }
 }

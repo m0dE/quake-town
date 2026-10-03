@@ -4,10 +4,12 @@
 //     (not stuck, not floating), not in liquid, spawns ≥ 64 units apart (no instant telefrag)
 //   - every item / weapon fits (hull-1 test at the qw-qc item bbox) and drops to a floor
 //   - worldspawn message, sky, required entity counts
+//   - walk-reachability (lib/reach.mjs): every spawn and item reachable from the spawns, no one-way spawns
 //   node tools/content/check-map.mjs path/to/map.bsp
 // Copyright (C) 2026 Quake Town contributors. GPL-2.0-or-later.
 import { readFileSync } from 'node:fs';
 import { parseBsp, pointContents, dropToFloor, CONTENTS } from './lib/bsp.mjs';
+import { reachability } from './lib/reach.mjs';
 
 const vec = (s) => s.split(/\s+/).map(Number);
 
@@ -58,6 +60,9 @@ export function checkMap(bsp, builder = null, req = builder?.requirements ?? {})
     const drop = dropToFloor(bsp, 1, p, 256);
     if (drop === Infinity) errs.push(`${e.classname} at ${e.origin} has no floor within 256`);
   }
+  const reach = reachability(bsp);
+  errs.push(...reach.errs);
+  notes.push(reach.stats, ...reach.mech);
   const report = [`check: ${spawns.length} spawns (${dm} dm), ${items} items, ${errs.length} errors, ${notes.length} notes`,
     ...errs.map((e) => `  ERROR ${e}`), ...notes.map((n) => `  note ${n}`)].join('\n');
   return { ok: errs.length === 0, errs, notes, report };

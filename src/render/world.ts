@@ -28,9 +28,12 @@ export interface Batch {
   page: number;
   /** world faces of this batch (submodel faces are not here) */
   faces: Int32Array;
-  /** faces visible this frame (prefix of `visFaces`) */
+  /** faces visible this frame (prefix of `visFaces`), front to back */
   visCount: number;
   visFaces: Int32Array;
+  /** visible faces a dynamic light reaches (drawn with the dlight shader variant) */
+  litCount: number;
+  litFaces: Int32Array;
 }
 
 export interface LightmapPage {
@@ -103,18 +106,30 @@ export class WorldGeometry {
   readonly submodels: SubmodelBatches[] = [];
   /** dynamic index buffer of the world (capacity = all world face indices) */
   readonly worldIndices: Uint32Array;
-  /** filled by cull(): per batch start/count into worldIndices */
+  /** filled by cull(): per batch start/count into worldIndices (plain faces, then lit faces) */
   readonly batchStart: Int32Array;
   readonly batchCount: Int32Array;
+  readonly litStart: Int32Array;
+  readonly litCount: Int32Array;
+  /** batches in the order they were first reached front to back (draw them in this order) */
+  readonly order: Int32Array;
+  orderCount = 0;
+  /** per face bounding sphere (x, y, z, r) for dlight tests */
+  readonly faceSphere: Float32Array;
   /** whether the map has light data at all (else everything is fullbright, like Quake) */
   readonly hasLight: boolean;
 
   // culling state
   private visRow: Uint8Array;
-  private visLeafs: Int32Array;
-  private numVisLeafs = 0;
   private lastLeaf = -2;
-  private faceStamp: Int32Array;
+  private visStamp = 0;
+  private nodeVis: Int32Array;
+  private leafVis: Int32Array;
+  private faceVis: Int32Array;
+  private nodeParent: Int32Array;
+  private leafParent: Int32Array;
+  private stack: Int32Array;
+  private batchSeen: Int32Array;
   private frameNo = 0;
   stats = { leafs: 0, faces: 0, indices: 0 };
 
@@ -191,7 +206,7 @@ export class WorldGeometry {
       if (b === undefined) {
         b = this.batches.length;
         batchKey.set(key, b);
-        this.batches.push({ id: b, kind, tex, page: pg, faces: new Int32Array(0), visCount: 0, visFaces: new Int32Array(0) });
+        this.batches.push({ id: b, kind, tex, page: pg, faces: new Int32Array(0), visCount: 0, visFaces: new Int32Array(0), litCount: 0, litFaces: new Int32Array(0) });
       }
       this.faceBatch[f] = b;
     }
@@ -266,7 +281,7 @@ export class WorldGeometry {
     const w0 = bsp.models[0];
     const counts = new Int32Array(this.batches.length);
     for (let f = w0.firstface; f < w0.firstface + w0.numfaces; f++) counts[this.faceBatch[f]]++;
-    for (const b of this.batches) { b.faces = new Int32Array(counts[b.id]); b.visFaces = new Int32Array(counts[b.id]); }
+    for (const b of this.batches) { b.faces = new Int32Array(counts[b.id]); b.visFaces = new Int32Array(counts[b.id]); b.litFaces = new Int32Array(counts[b.id]); }
     counts.fill(0);
     let worldIdx = 0;
     for (let f = w0.firstface; f < w0.firstface + w0.numfaces; f++) {
@@ -277,6 +292,24 @@ export class WorldGeometry {
     this.worldIndices = new Uint32Array(Math.max(3, worldIdx));
     this.batchStart = new Int32Array(this.batches.length);
     this.batchCount = new Int32Array(this.batches.length);
+    this.litStart = new Int32Array(this.batches.length);
+    this.litCount = new Int32Array(this.batches.length);
+    this.order = new Int32Array(this.batches.length);
+    this.batchSeen = new Int32Array(this.batches.length);
+    this.faceSphere = new Float32Array(nf * 4);
+    for (let f = 0; f < nf; f++) {
+      const s0 = this.faceIdxStart[f], n = this.faceIdxCount[f];
+      if (!n) continue;
+      let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
+      for (let k = 0; k < n; k++) {
+        const v = this.faceIdx[s0 + k] * 3, P = this.position;
+        if (P[v] < x0) x0 = P[v]; if (P[v] > x1) x1 = P[v];
+        if (P[v + 1] < y0) y0 = P[v + 1]; if (P[v + 1] > y1) y1 = P[v + 1];
+        if (P[v + 2] < z0) z0 = P[v + 2]; if (P[v + 2] > z1) z1 = P[v + 2];
+      }
+      this.faceSphere[f * 4] = (x0 + x1) / 2; this.faceSphere[f * 4 + 1] = (y0 + y1) / 2; this.faceSphere[f * 4 + 2] = (z0 + z1) / 2;
+      this.faceSphere[f * 4 + 3] = Math.hypot(x1 - x0, y1 - y0, z1 - z0) / 2;
+    }
 
     // ---- submodels: static index buffers grouped by batch
     for (let m = 0; m < bsp.models.length; m++) {
@@ -303,8 +336,18 @@ export class WorldGeometry {
 
     // culling state
     this.visRow = new Uint8Array(((bsp.models[0].visleafs + 7) >> 3) + 4);
-    this.visLeafs = new Int32Array(bsp.numLeafs);
-    this.faceStamp = new Int32Array(nf);
+    this.nodeVis = new Int32Array(bsp.numNodes);
+    this.leafVis = new Int32Array(bsp.numLeafs);
+    this.faceVis = new Int32Array(nf);
+    this.nodeParent = new Int32Array(bsp.numNodes).fill(-1);
+    this.leafParent = new Int32Array(bsp.numLeafs).fill(-1);
+    for (let n = 0; n < bsp.numNodes; n++) {
+      for (let c = 0; c < 2; c++) {
+        const ch = bsp.nodeChildren[n * 2 + c];
+        if (ch >= 0) this.nodeParent[ch] = n; else this.leafParent[-1 - ch] = n;
+      }
+    }
+    this.stack = new Int32Array(bsp.numNodes * 2 + 64);
   }
 
   private faceHasLightmap(f: number): boolean {
@@ -320,78 +363,133 @@ export class WorldGeometry {
     return pointInLeaf(this.bsp, x, y, z, this.bsp.models[0].headnode);
   }
 
-  /** is the leaf visible from the current view leaf (call after cull()) */
+  /** is the leaf in the PVS of the current view leaf (call after cull()) */
   leafVisible(leaf: number): boolean {
     if (leaf <= 0) return true;
-    return (this.visRow[(leaf - 1) >> 3] & (1 << ((leaf - 1) & 7))) !== 0;
+    return this.leafVis[leaf] === this.visStamp;
   }
 
   /**
-   * R_MarkLeaves + R_RecursiveWorldNode equivalent: fills worldIndices and per-batch
-   * start/count with the faces in the PVS of the camera leaf that pass the frustum
-   * (per leaf box) and face the camera. `planes` = 5 frustum planes (nx, ny, nz, d) with
-   * the inside where n·p - d >= 0. No allocation.
+   * R_MarkLeaves + R_RecursiveWorldNode: on a camera leaf change, the PVS marks leaves,
+   * their faces and their ancestor nodes; every frame the node tree is walked front to back
+   * with a frustum test per node, and each node's marked, camera-facing faces are appended
+   * to their batch — so the index buffer is close to front-to-back order (early-z). Faces a
+   * dynamic light reaches (`dl` = x, y, z, radius × numDl) go to the batch's lit list, drawn
+   * with the dlight shader variant; the rest skip the light loop. `planes` = frustum planes
+   * (nx, ny, nz, d), inside where n·p - d >= 0. No allocation.
    */
-  cull(cx: number, cy: number, cz: number, planes: Float32Array, numPlanes: number, novis: boolean): void {
+  cull(cx: number, cy: number, cz: number, planes: Float32Array, numPlanes: number, novis: boolean, dl?: Float32Array, numDl = 0): void {
+    this.markLeaves(cx, cy, cz, novis);
+    this.walk(cx, cy, cz, planes, numPlanes, dl, numDl);
+  }
+
+  /** R_MarkLeaves: PVS of the camera leaf → leaf/node/face marks (only when the leaf changes). */
+  markLeaves(cx: number, cy: number, cz: number, novis: boolean): void {
     const bsp = this.bsp;
     const leaf = this.leafAt(cx, cy, cz);
     const key = novis ? -3 : leaf;
     if (key !== this.lastLeaf) {
       this.lastLeaf = key;
+      const stamp = ++this.visStamp;
       const nl = bsp.models[0].visleafs;
       if (novis || leaf <= 0 || bsp.leafContents[leaf] === -2) this.visRow.fill(0xff);
       else decompressVis(bsp, leaf, this.visRow);
-      let n = 0;
-      for (let i = 0; i < nl; i++) if (this.visRow[i >> 3] & (1 << (i & 7))) this.visLeafs[n++] = i + 1;
-      this.numVisLeafs = n;
+      for (let i = 0; i < nl; i++) {
+        if (!(this.visRow[i >> 3] & (1 << (i & 7)))) continue;
+        const l = i + 1;
+        this.leafVis[l] = stamp;
+        const fm = bsp.leafFirstMark[l], nm = bsp.leafNumMark[l];
+        for (let k = 0; k < nm; k++) this.faceVis[bsp.marksurfaces[fm + k]] = stamp;
+        let n = this.leafParent[l];
+        while (n >= 0 && this.nodeVis[n] !== stamp) { this.nodeVis[n] = stamp; n = this.nodeParent[n]; }
+      }
     }
+  }
+
+  /** R_RecursiveWorldNode over the marked nodes (call markLeaves first). */
+  walk(cx: number, cy: number, cz: number, planes: Float32Array, numPlanes: number, dl?: Float32Array, numDl = 0): void {
+    const bsp = this.bsp;
+    const stamp = this.visStamp;
     const frame = ++this.frameNo;
-    for (let b = 0; b < this.batches.length; b++) this.batches[b].visCount = 0;
-    const LB = bsp.leafBounds, P = bsp.planes;
-    let leafs = 0, faces = 0;
-    for (let i = 0; i < this.numVisLeafs; i++) {
-      const l = this.visLeafs[i];
-      const nm = bsp.leafNumMark[l];
-      if (nm === 0) continue;
-      const o = l * 6;
+    for (let b = 0; b < this.batches.length; b++) { this.batches[b].visCount = 0; this.batches[b].litCount = 0; }
+    this.orderCount = 0;
+    const NB = bsp.nodeBounds, P = bsp.planes, FS = this.faceSphere;
+    let nodes = 0, faces = 0;
+    // explicit stack: n >= 0 visit node n; n < 0 emit the faces of node (-1 - n)
+    const st = this.stack;
+    let sp = 0;
+    st[sp++] = bsp.models[0].headnode;
+    while (sp > 0) {
+      const n = st[--sp];
+      if (n < 0) {
+        const nd = -1 - n;
+        const ff = bsp.nodeFirstFace[nd], nf = bsp.nodeNumFaces[nd];
+        for (let k = 0; k < nf; k++) {
+          const f = ff + k;
+          if (this.faceVis[f] !== stamp) continue;
+          const pi = bsp.facePlane[f] * 4;
+          let d = cx * P[pi] + cy * P[pi + 1] + cz * P[pi + 2] - P[pi + 3];
+          if (bsp.faceSide[f]) d = -d;
+          if (d < -0.01) continue; // back facing (BACKFACE_EPSILON)
+          const bi = this.faceBatch[f];
+          const b = this.batches[bi];
+          if (this.batchSeen[bi] !== frame) { this.batchSeen[bi] = frame; this.order[this.orderCount++] = bi; }
+          let lit = false;
+          if (numDl > 0 && dl && (b.kind === 'lm' || b.kind === 'cutout')) {
+            const x = FS[f * 4], y = FS[f * 4 + 1], z = FS[f * 4 + 2], r = FS[f * 4 + 3];
+            for (let i = 0; i < numDl; i++) {
+              const dx = dl[i * 4] - x, dy = dl[i * 4 + 1] - y, dz = dl[i * 4 + 2] - z, rr = dl[i * 4 + 3] + r;
+              if (dx * dx + dy * dy + dz * dz < rr * rr) { lit = true; break; }
+            }
+          }
+          if (lit) b.litFaces[b.litCount++] = f; else b.visFaces[b.visCount++] = f;
+          faces++;
+        }
+        continue;
+      }
+      if (this.nodeVis[n] !== stamp) continue;
+      const o = n * 6;
       let out = false;
       for (let p = 0; p < numPlanes; p++) {
         const px = planes[p * 4], py = planes[p * 4 + 1], pz = planes[p * 4 + 2];
-        // positive vertex
-        const x = px >= 0 ? LB[o + 3] : LB[o], y = py >= 0 ? LB[o + 4] : LB[o + 1], z = pz >= 0 ? LB[o + 5] : LB[o + 2];
+        const x = px >= 0 ? NB[o + 3] : NB[o], y = py >= 0 ? NB[o + 4] : NB[o + 1], z = pz >= 0 ? NB[o + 5] : NB[o + 2];
         if (px * x + py * y + pz * z - planes[p * 4 + 3] < 0) { out = true; break; }
       }
       if (out) continue;
-      leafs++;
-      const fm = bsp.leafFirstMark[l];
-      for (let k = 0; k < nm; k++) {
-        const f = bsp.marksurfaces[fm + k];
-        if (this.faceStamp[f] === frame) continue;
-        this.faceStamp[f] = frame;
-        const pi = bsp.facePlane[f] * 4;
-        let d = cx * P[pi] + cy * P[pi + 1] + cz * P[pi + 2] - P[pi + 3];
-        if (bsp.faceSide[f]) d = -d;
-        if (d < -0.01) continue; // back facing (BACKFACE_EPSILON)
-        const b = this.batches[this.faceBatch[f]];
-        b.visFaces[b.visCount++] = f;
-        faces++;
-      }
+      nodes++;
+      const pi = bsp.nodePlane[n] * 4;
+      const side = cx * P[pi] + cy * P[pi + 1] + cz * P[pi + 2] - P[pi + 3] >= 0 ? 0 : 1;
+      const front = bsp.nodeChildren[n * 2 + side], back = bsp.nodeChildren[n * 2 + 1 - side];
+      // pop order: front, node faces, back
+      if (back >= 0) st[sp++] = back;
+      if (bsp.nodeNumFaces[n]) st[sp++] = -1 - n;
+      if (front >= 0) st[sp++] = front;
     }
-    // write indices
+    // write indices batch by batch in first-reached order: plain faces, then lit faces
     let o = 0;
     const out = this.worldIndices, src = this.faceIdx;
-    for (let b = 0; b < this.batches.length; b++) {
+    for (let b = 0; b < this.batches.length; b++) { this.batchCount[b] = 0; this.litCount[b] = 0; }
+    for (let k = 0; k < this.orderCount; k++) {
+      const b = this.order[k];
       const bt = this.batches[b];
       this.batchStart[b] = o;
-      for (let k = 0; k < bt.visCount; k++) {
-        const f = bt.visFaces[k];
+      for (let i = 0; i < bt.visCount; i++) {
+        const f = bt.visFaces[i];
         let s = this.faceIdxStart[f];
         const e = s + this.faceIdxCount[f];
         while (s < e) out[o++] = src[s++];
       }
       this.batchCount[b] = o - this.batchStart[b];
+      this.litStart[b] = o;
+      for (let i = 0; i < bt.litCount; i++) {
+        const f = bt.litFaces[i];
+        let s = this.faceIdxStart[f];
+        const e = s + this.faceIdxCount[f];
+        while (s < e) out[o++] = src[s++];
+      }
+      this.litCount[b] = o - this.litStart[b];
     }
-    this.stats.leafs = leafs; this.stats.faces = faces; this.stats.indices = o;
+    this.stats.leafs = nodes; this.stats.faces = faces; this.stats.indices = o;
   }
 
   /**

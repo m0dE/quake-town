@@ -18,7 +18,7 @@ import { BrushSet } from './brushset';
 import { DL_COLORS, DL_LIGHT_COLORS, Dlights, MAX_BEAMS, MAX_DLIGHT_SLOTS, MAX_EXPLOSIONS, Particles, TempEnts, PT_EXPLODE, PT_EXPLODE2, PT_FIRE, PT_BLOB, PT_BLOB2 } from './effects';
 import { MF_GIB, MF_GRENADE, MF_ROCKET, MF_ROTATE, MF_TRACER, MF_TRACER2, MF_TRACER3, MF_ZOMGIB, loadMdl, loadSpr, mdlPose, mdlSkinImage, type Spr } from './mdl';
 import { Palette } from './palette';
-import { PostFX, type PostOptions } from './post';
+import { PostFX, SCENE_SCALE, type PostOptions } from './post';
 import { GLOW_FS, GLOW_VS, MAX_DLIGHTS, PARTICLE_FS, PARTICLE_VS, SPRITE_FS, SPRITE_VS } from './shaders';
 import { applyFilter, rgbaTexture } from './textures';
 import {
@@ -151,6 +151,8 @@ export class Renderer {
     uSkyEmissive: { value: 0 },
     uWarpLight: { value: 1 },
     uAlpha: { value: 1 },
+    uOpaque: { value: 0 },
+    uOutScale: { value: 1 },
   };
   private modelNoDl = { uNumDl: { value: 0 } };
   // alias pools
@@ -194,6 +196,9 @@ export class Renderer {
   private blend = new Float32Array(4);
   private dlScore = new Float32Array(MAX_DLIGHT_SLOTS);
   private dlPicked = new Int32Array(MAX_DLIGHTS);
+  /** the picked dlights (x, y, z, radius) for the world walk's lit/plain face split */
+  private dlCull = new Float32Array(MAX_DLIGHTS * 4);
+  private numDlCull = 0;
   private zeroVec: Vec3 = [0, 0, 0];
 
   constructor(canvas: HTMLCanvasElement, vfs: Vfs, settings: Partial<RenderSettings> = {}) {
@@ -205,6 +210,11 @@ export class Renderer {
       preserveDrawingBuffer: false,
     });
     this.gl.autoClear = false;
+    // draw in the order we add things (the world walk is front to back; transparents last)
+    this.gl.sortObjects = false;
+    // no synchronous getProgramInfoLog/LINK_STATUS queries (they stall on every new program);
+    // programs are compiled up front by warm() with KHR_parallel_shader_compile
+    this.gl.debug.checkShaderErrors = !!settings.debugShaders;
     this.gl.info.autoReset = false;
     this.gl.setClearColor(0x000000, 1);
     this.pal = Palette.fromVfs(vfs);
@@ -223,7 +233,7 @@ export class Renderer {
       vertexShader: PARTICLE_VS, fragmentShader: PARTICLE_FS, glslVersion: THREE.GLSL3, transparent: true, depthWrite: false,
       uniforms: {
         uRight: { value: new THREE.Vector3() }, uUp: { value: new THREE.Vector3() }, uFwd: { value: new THREE.Vector3() },
-        uCam: this.su.uCam, uSize: { value: 1 }, uRound: { value: 1 },
+        uCam: this.su.uCam, uSize: { value: 1 }, uRound: { value: 1 }, uOutScale: this.su.uOutScale,
       },
     });
     this.partMat.blending = THREE.CustomBlending;
@@ -237,7 +247,7 @@ export class Renderer {
     // flashblend glows
     const glowMat = new THREE.RawShaderMaterial({
       vertexShader: GLOW_VS, fragmentShader: GLOW_FS, glslVersion: THREE.GLSL3, transparent: true, depthWrite: false,
-      uniforms: { uRight: { value: new THREE.Vector3() }, uUp: { value: new THREE.Vector3() }, uFwd: { value: new THREE.Vector3() } },
+      uniforms: { uRight: { value: new THREE.Vector3() }, uUp: { value: new THREE.Vector3() }, uFwd: { value: new THREE.Vector3() }, uOutScale: { value: 1 } },
     });
     glowMat.blending = THREE.CustomBlending;
     glowMat.blendSrc = THREE.OneFactor; glowMat.blendDst = THREE.OneFactor;
@@ -255,7 +265,7 @@ export class Renderer {
     this.scene.add(this.glow.mesh);
     this.spriteMat = new THREE.RawShaderMaterial({
       vertexShader: SPRITE_VS, fragmentShader: SPRITE_FS, glslVersion: THREE.GLSL3,
-      uniforms: { uRight: { value: new THREE.Vector3() }, uUp: { value: new THREE.Vector3() }, uAtlas: { value: null }, uEmissive: { value: 0 } },
+      uniforms: { uRight: { value: new THREE.Vector3() }, uUp: { value: new THREE.Vector3() }, uAtlas: { value: null }, uEmissive: { value: 0 }, uOpaque: this.su.uOpaque, uOutScale: this.su.uOutScale },
     });
     this.resize(canvas.clientWidth || canvas.width || 640, canvas.clientHeight || canvas.height || 480, 1);
   }
@@ -278,11 +288,13 @@ export class Renderer {
     const index = new THREE.BufferAttribute(geom.worldIndices, 1);
     index.setUsage(THREE.DynamicDrawUsage);
     g.setIndex(index);
-    const mesh = new THREE.Mesh(g, set.materials);
+    const mesh = new THREE.Mesh(g, set.worldMaterials);
     mesh.frustumCulled = false;
     mesh.matrixAutoUpdate = false;
     this.scene.add(mesh);
-    const groups = geom.batches.map((b) => ({ start: 0, count: 0, materialIndex: b.id }));
+    const nb = geom.batches.length;
+    const groups = geom.batches.map((b) => ({ start: 0, count: 0, materialIndex: b.id }))
+      .concat(geom.batches.map((b) => ({ start: 0, count: 0, materialIndex: nb + b.id })));
     const subMeshes: (THREE.Mesh | null)[] = [null];
     for (let i = 1; i < bsp.models.length; i++) {
       const sm = set.makeMesh(i);
@@ -299,6 +311,9 @@ export class Renderer {
       else if (v.length >= 2 && v[0] > 0) fog.set(v[1], v[1], v[1], v[0] / 64);
     }
     const wa = ws ? parseFloat(ws.wateralpha ?? ws._wateralpha ?? '') : NaN;
+    // particles and glows draw after the world's translucent water
+    this.scene.remove(this.partMesh); this.scene.add(this.partMesh);
+    this.scene.remove(this.glow.mesh); this.scene.add(this.glow.mesh);
     this.map = {
       name: path, set, worldGeo: g, worldMesh: mesh, groups, subMeshes, subDrawn: new Uint8Array(bsp.models.length), fog,
       waterAlpha: wa > 0 && wa < 1 ? wa : -1,
@@ -309,6 +324,39 @@ export class Renderer {
     this.esSerial.fill(-1);
     this.lastTime = -1;
     this.applyTextureSettings();
+    await this.warm();
+  }
+
+  /**
+   * Compile every shader program the frame can need (world variants, sky, warp, alias
+   * opaque/translucent, sprites, particles, glows, gun, all post passes) before the first
+   * frame, in parallel where KHR_parallel_shader_compile exists — no hitch when the first
+   * rocket, explosion or translucent body appears.
+   */
+  async warm(): Promise<void> {
+    const ws = new THREE.Scene();
+    const keep: THREE.Mesh[] = [];
+    const add = (m: THREE.Material) => { const x = new THREE.Mesh(this.partGeo, m); keep.push(x); ws.add(x); };
+    if (this.aliasOpaque.length === 0) this.allocAlias(false);
+    if (this.aliasTrans.length === 0) this.allocAlias(true);
+    this.nOpaque = 0; this.nTrans = 0;
+    this.aliasOpaque[0].mesh.visible = false; this.aliasTrans[0].mesh.visible = false;
+    add(this.aliasOpaque[0].mat); add(this.aliasTrans[0].mat); add(this.spriteMat);
+    for (const m of this.post.materials()) add(m);
+    if (this.map) {
+      for (const m of this.map.set.worldMaterials) add(m);
+      for (const m of this.map.set.warpTrans) if (m) add(m);
+    }
+    try {
+      await Promise.all([
+        this.gl.compileAsync(this.scene, this.camera),
+        this.gl.compileAsync(this.vmScene, this.vmCamera),
+        this.gl.compileAsync(ws, this.camera),
+      ]);
+    } catch (err) {
+      console.warn('render: shader warm-up failed', err);
+    }
+    void keep;
   }
 
   /** Parsed entities of the loaded map (spawn points for tests, worldspawn keys). */
@@ -399,20 +447,7 @@ export class Renderer {
       this.frustumPlanes();
       const leaf = g.leafAt(ox, oy, oz);
       if (cam.contents === undefined) contents = g.bsp.leafContents[leaf] ?? -1;
-      g.cull(ox, oy, oz, this.planes, 5, false);
-      const groups = map.worldGeo.groups as { start: number; count: number; materialIndex: number }[];
-      groups.length = 0;
-      for (let b = 0; b < g.batches.length; b++) {
-        const c = g.batchCount[b];
-        if (!c) continue;
-        const gr = map.groups[b];
-        gr.start = g.batchStart[b]; gr.count = c;
-        groups.push(gr);
-      }
-      const idx = map.worldGeo.index!;
-      idx.clearUpdateRanges();
-      idx.addUpdateRange(0, g.stats.indices);
-      idx.needsUpdate = true;
+      g.markLeaves(ox, oy, oz, false);
       map.set.update(time, this.waterAlpha(), S.bloom);
     }
 
@@ -436,6 +471,24 @@ export class Renderer {
 
     // dlights → uniforms (+ flashblend glows)
     this.uploadDlights(ox, oy, oz);
+
+    // the world walk (front to back), faces reached by a dlight split off to the dlight variant
+    if (map) {
+      const g = map.set.geom;
+      g.walk(ox, oy, oz, this.planes, 5, this.dlCull, this.numDlCull);
+      const groups = map.worldGeo.groups as { start: number; count: number; materialIndex: number }[];
+      groups.length = 0;
+      const nb = g.batches.length;
+      for (let k = 0; k < g.orderCount; k++) {
+        const b = g.order[k];
+        if (g.batchCount[b]) { const gr = map.groups[b]; gr.start = g.batchStart[b]; gr.count = g.batchCount[b]; groups.push(gr); }
+        if (g.litCount[b]) { const gr = map.groups[nb + b]; gr.start = g.litStart[b]; gr.count = g.litCount[b]; groups.push(gr); }
+      }
+      const idx = map.worldGeo.index!;
+      idx.clearUpdateRanges();
+      idx.addUpdateRange(0, g.stats.indices);
+      idx.needsUpdate = true;
+    }
 
     // global uniforms from settings
     const modern = S.toneMapping === 'aces' || S.bloom;
@@ -474,11 +527,14 @@ export class Renderer {
     const tPrep = performance.now();
     const usePost = S.bloom || S.toneMapping !== 'none' || S.fxaa || S.ssao || S.msaa > 0 || S.gamma !== 1 || S.waterWarp && contents <= CONTENTS_WATER && contents >= CONTENTS_LAVA;
     const size = gl.getDrawingBufferSize(this.tmpSize);
+    this.su.uOpaque.value = usePost ? 0 : 1;
+    this.su.uOutScale.value = usePost ? SCENE_SCALE : 1;
+    (this.glow.mesh.material as THREE.RawShaderMaterial).uniforms.uOutScale.value = this.su.uOutScale.value;
     if (usePost) {
       this.post.setSize(size.x, size.y, S.msaa, S.ssao);
       gl.setRenderTarget(this.post.scene);
     } else gl.setRenderTarget(null);
-    gl.setClearColor(0x000000, 0);
+    gl.setClearColor(0x000000, usePost ? 0 : 1);
     gl.clear(true, true, false);
     gl.render(this.scene, this.camera);
     if (vmDrawn) {
@@ -493,13 +549,6 @@ export class Renderer {
       this.post.finish(gl, po, bl, warp, time, this.camera);
     } else {
       this.post.drawBlend(gl, bl);
-      // the scene shaders write a bloom weight into alpha; make the canvas opaque again
-      const ctx = gl.getContext();
-      ctx.colorMask(false, false, false, true);
-      ctx.clearColor(0, 0, 0, 1);
-      ctx.clear(ctx.COLOR_BUFFER_BIT);
-      ctx.colorMask(true, true, true, true);
-      ctx.clearColor(0, 0, 0, 0);
     }
 
     const st = this.lastStats;
@@ -617,6 +666,8 @@ export class Renderer {
     const mat = batch.mesh.material as THREE.RawShaderMaterial;
     mat.uniforms.uAtlas = { value: tex };
     mat.uniforms.uEmissive = { value: 0 };
+    mat.uniforms.uOpaque = this.su.uOpaque; // clone() copied these: keep the shared ones
+    mat.uniforms.uOutScale = this.su.uOutScale;
     mat.uniforms.uRight = { value: new THREE.Vector3() };
     mat.uniforms.uUp = { value: new THREE.Vector3() };
     batch.mesh.renderOrder = 5;
@@ -657,6 +708,7 @@ export class Renderer {
   private newAliasInst(translucent: boolean, scene: THREE.Scene): AliasInst {
     const mat = aliasMaterial(this.aliasShared, {
       uNumDl: this.su.uNumDl, uDlPos: this.su.uDlPos, uDlCol: this.su.uDlCol, uFog: this.su.uFog, uCam: this.su.uCam,
+      uOpaque: this.su.uOpaque, uOutScale: this.su.uOutScale,
     }, translucent);
     const mesh = new THREE.Mesh(new THREE.BufferGeometry(), mat);
     mesh.frustumCulled = false;
@@ -994,7 +1046,7 @@ export class Renderer {
       const c = P.color[i];
       const t = P.type[i];
       let k = 1 / 255, a = 1, s = 1;
-      if (t === PT_FIRE) { a = (6 - P.ramp[i]) / 6; k *= hot; if (modern) s = 1.6; }
+      if (t === PT_FIRE) { a = (6 - P.ramp[i]) / 6; k *= hot; if (modern) s = 1.15; }
       else if (t === PT_EXPLODE || t === PT_EXPLODE2 || t === PT_BLOB || t === PT_BLOB2) k *= hot;
       pos[o + 3] = s;
       col[o] = pal[c * 3] * k; col[o + 1] = pal[c * 3 + 1] * k; col[o + 2] = pal[c * 3 + 2] * k; col[o + 3] = a;
@@ -1006,7 +1058,8 @@ export class Renderer {
     (u.uRight.value as THREE.Vector3).set(this.right[0], this.right[1], this.right[2]);
     (u.uUp.value as THREE.Vector3).set(this.up[0], this.up[1], this.up[2]);
     (u.uFwd.value as THREE.Vector3).set(this.fwd[0], this.fwd[1], this.fwd[2]);
-    u.uSize.value = modern ? 1.0 : 0.75;
+    // GLQuake: a triangle with 1.5-unit legs; soft round dots read smaller, so a touch larger
+    u.uSize.value = modern ? 0.85 : 0.75;
     u.uRound.value = modern ? 1 : 0;
   }
 
@@ -1025,7 +1078,8 @@ export class Renderer {
       for (let i = 0; i < MAX_DLIGHT_SLOTS; i++) {
         if (!D.alive(i)) { this.dlScore[i] = -1; continue; }
         const d = Math.hypot(D.origin[i * 3] - cx, D.origin[i * 3 + 1] - cy, D.origin[i * 3 + 2] - cz);
-        this.dlScore[i] = D.radius[i] / (d + 64);
+        // lights whose sphere is off screen light nothing we draw
+        this.dlScore[i] = this.sphereVisible(D.origin[i * 3], D.origin[i * 3 + 1], D.origin[i * 3 + 2], D.radius[i]) ? D.radius[i] / (d + 64) : -1;
         if (S.flashblend) {
           // R_RenderDlight: a ball of radius*0.35 pushed towards the viewer
           const rad = D.radius[i] * 0.35;
@@ -1046,11 +1100,14 @@ export class Renderer {
           const c = modern ? DL_LIGHT_COLORS[D.type[best]] : WHITE;
           this.su.uDlPos.value[n].set(D.origin[best * 3], D.origin[best * 3 + 1], D.origin[best * 3 + 2], D.radius[best]);
           this.su.uDlCol.value[n].set(c[0], c[1], c[2], D.minlight[best]);
+          this.dlCull[n * 4] = D.origin[best * 3]; this.dlCull[n * 4 + 1] = D.origin[best * 3 + 1];
+          this.dlCull[n * 4 + 2] = D.origin[best * 3 + 2]; this.dlCull[n * 4 + 3] = D.radius[best];
           n++;
         }
       }
     }
     this.su.uNumDl.value = n;
+    this.numDlCull = n;
   }
 
   /** V_AddLightBlend for gl_flashblend when the eye is inside a glow */

@@ -12,7 +12,7 @@ export const info = {
   modes: ['duel', '2on2', 'ffa', 'ca'], players: [2, 6],
 };
 
-const SKY = 'sky_orng';
+const SKY = 'sky5_dismal'; // dusky grey-blue
 const M = {
   atrium: { floor: 'met_brn_stile', wall: 'met_brn_block', wallLow: 'med_csl_brk15', wallTrim: 'met_brn_trim32', lowH: 96, trimH: 16, ceil: SKY },
   stone: { floor: 'med_csl_flr4_5', wall: 'med_csl_brk15', wallLow: 'med_csl_brk15b', wallTrim: 'met_brn_trim16', lowH: 64, ceil: 'met_brn_flat' },
@@ -32,7 +32,7 @@ export function build() {
   const m = new MapBuilder({
     message: 'Dark Spire',
     wads: ['lq_metal.wad', 'lq_medieval.wad', 'lq_tech.wad', 'lq_liquidsky.wad', 'lq_utility.wad'],
-    worldspawn: { _sunlight: '180', _sun_mangle: '60 -70 0', _sunlight_color: '1 0.7 0.45', _sunlight2: '60', _sunlight2_color: '1 0.6 0.4', _minlight: '24', _bounce: '1', _dirt: '1', _dirtscale: '1', sounds: '0' },
+    worldspawn: { _sunlight: '180', _sun_mangle: '60 -70 0', _sunlight_color: '0.85 0.88 1', _sunlight2: '70', _sunlight2_color: '0.6 0.65 0.85', _minlight: '24', _bounce: '1', _dirt: '1', _dirtscale: '1', sounds: '0' },
   });
   m.requirements = { dmSpawns: 8, counts: { weapon_rocketlauncher: 1, weapon_lightning: 1, weapon_grenadelauncher: 1, weapon_supernailgun: 1, item_armorInv: 1, item_armor2: 1, item_artifact_super_damage: 1 } };
   surfaceLight(m, 'met_brn_lit1', 120, '1 0.75 0.45');
@@ -94,9 +94,10 @@ export function build() {
 
   // ===== north room behind the ledge (L2) ==============================================
   m.air([-384, 384, 384, 384, 768, 608], M.metal);
-  m.box([-128, 640, 384, 128, 768, 448], { top: TX.ledgeTop, side: 'met_brn_trim32' }); // dais
+  m.box([-128, 640, 384, 128, 768, 416], { top: TX.ledgeTop, side: 'met_brn_trim32' }); // dais (two 16-unit steps)
+  m.box([-128, 608, 384, 128, 640, 400], { top: TX.ledgeTop, side: 'met_brn_trim16' });
   lamp(m, [0, 600, 608], { tex: 'tlight11', side: 'met_brn_trim16', light: 220, color: '1 0.8 0.6' });
-  m.item('item_cells', 0, 700, 448);
+  m.item('item_cells', 0, 700, 416);
   m.item('item_health', -300, 700, 384);
   m.item('item_rockets', 300, 700, 384);
 

@@ -61,6 +61,8 @@ function init(canvas: HTMLCanvasElement, vfs: Vfs): PreviewState {
     uDlCol: { value: Array.from({ length: MAX_DLIGHTS }, () => new THREE.Vector4()) },
     uFog: { value: new THREE.Vector4(0, 0, 0, 0) },
     uCam: { value: new THREE.Vector3() },
+    uOpaque: { value: 1 },
+    uOutScale: { value: 1 },
   };
   const mat = aliasMaterial(shared, su, false);
   const mesh = new THREE.Mesh(new THREE.BufferGeometry(), mat);

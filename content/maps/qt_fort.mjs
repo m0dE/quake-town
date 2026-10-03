@@ -136,6 +136,9 @@ function keep(m, t) {
   // --- flooded tunnel from the moat to the cistern, stairwell up into the hall -------------
   m.air(B(160, -64, -256, 1088, 64, -128), C.tunnel);
   m.box(B(160, -64, -256, 1088, 64, -128), WATER);
+  // air pocket halfway (no stretch of the flooded route is longer than ~400 units)
+  m.air(B(560, -64, -128, 720, 64, -40), C.tunnel);
+  m.light([X(640), 0, -64], 180, { _color: '0.6 0.85 1', wait: '0.6' });
   m.air(B(1088, -256, -256, 1664, 256, -64), t.room);                                                          // cistern
   m.box(B(1088, -256, -256, 1280, 256, -144), WATER);
   m.air(B(1280, -96, -256, 1600, 96, 0), t.room);                                                               // stairwell

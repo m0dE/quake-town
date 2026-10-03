@@ -177,6 +177,8 @@ export interface RenderSettings {
   resolutionScale: number;
   /** cap on devicePixelRatio */
   maxPixelRatio: number;
+  /** three.js shader error checks (synchronous link queries: slow; for development) */
+  debugShaders?: boolean;
 }
 
 /** The look of a player for the menu preview (DESIGN.md "Customization"). */
@@ -201,7 +203,7 @@ export const CLASSIC_SETTINGS: RenderSettings = {
 
 /** Modern look: trilinear + anisotropic, dynamic lights in the lightmapped shader, bloom, ACES. */
 export const MODERN_SETTINGS: RenderSettings = {
-  textureFilter: 'linear', anisotropy: 8, dynamicLights: true, flashblend: false, drawflat: false,
+  textureFilter: 'linear', anisotropy: 4, dynamicLights: true, flashblend: false, drawflat: false,
   fullbrightSkins: false, lerpFrames: true, smoothLightstyles: true, waterAlpha: 0.6, drawViewModel: true,
   viewModelFov: 0, particles: 'modern', modelLighting: 'modern', bloom: true, bloomStrength: 0.55,
   toneMapping: 'aces', exposure: 1.2, ssao: false, fxaa: true, msaa: 0, gamma: 1, lightmapScale: 1,
