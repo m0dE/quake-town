@@ -1,11 +1,10 @@
 /**
  * The menu on its own (no game): http://localhost:5192/src/menu/dev.html
- *   ?mock=1     fake room listing + fake id-pak loader, for screenshots and layout work
- *   ?screen=id  open a screen (servers, host, player, settings, paks)
+ *   ?mock=1     fake room listing, for screenshots and layout work
+ *   ?screen=id  open a screen (host, player, settings)
  */
 import { showMenu } from './index.js';
 import { encodeRoomId, standingConfig, defaultConfig } from '../rooms/index.js';
-import type { IdPakLoader } from './types.js';
 
 const q = new URLSearchParams(location.search);
 const mock = q.has('mock');
@@ -32,20 +31,13 @@ if (mock) {
   }) as typeof fetch;
 }
 
-const idPaks: IdPakLoader | undefined = mock ? {
-  async status() { return { loaded: false, files: [] }; },
-  async load(files) { return { ok: true, message: `Loaded ${files.length} file(s).` }; },
-  async forget() { /* nothing */ },
-} : undefined;
-
-// ?real=1: the renderer's 3D preview and the content part's id-pak loader, wired as main.ts would.
+// ?real=1: the renderer's 3D preview, wired as main.ts would.
 async function realDeps(): Promise<Partial<import('./types.js').MenuDeps>> {
   const { createContent } = await import('../content/index.js');
   const { renderCharacterPreview } = await import('../render/preview.js');
   const content = createContent();
   await content.loadBase();
   return {
-    idPaks: content.idPaks,
     renderPreview: (canvas, look, t) => renderCharacterPreview(canvas, content.vfs, {
       model: `progs/${look.model}.mdl`, skin: Number.parseInt(look.skin, 10) || 0, top: look.topcolor, bottom: look.bottomcolor,
     }, t),
@@ -56,10 +48,11 @@ const extra = q.has('real') ? await realDeps() : {};
 const out = document.createElement('pre');
 out.style.cssText = 'position:fixed;right:8px;bottom:48px;max-width:50vw;max-height:40vh;overflow:auto;background:#000c;color:#9f9;font:11px monospace;padding:8px;z-index:99;margin:0';
 
-void showMenu(document.getElementById('app')!, { idPaks, notice: q.get('notice') ?? undefined, ...extra }).then((req) => {
+void showMenu(document.getElementById('app')!, { notice: q.get('notice') ?? undefined, ...extra }).then((req) => {
   out.textContent = JSON.stringify({ ...req, identity: req.identity ? req.identity.username : null }, null, 2);
   document.body.append(out);
 });
 
 const screen = q.get('screen');
-if (screen) document.querySelector<HTMLElement>(`.nav-item[data-screen="${screen}"]`)?.click();
+if (screen) if (screen === 'player') document.querySelector<HTMLElement>('.customize')?.click();
+else if (screen) document.querySelector<HTMLElement>(`.nav-item[data-screen="${screen}"]`)?.click();

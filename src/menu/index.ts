@@ -5,33 +5,29 @@
  */
 import './menu.css';
 import {
-  MODES, MODE_ORDER, REGIONS, decodeRoomId, encodeRoomId, homeRegion, isMode, isRegion, regionNodeUrl,
-  roomFromHash, standingConfig, toServerinfo, quickPlay, fetchServers, passwordMatches, mapTitles,
+  MODES, decodeRoomId, homeRegion, isMode, isRegion, regionNodeUrl, roomFromHash, toServerinfo, passwordMatches, mapTitles,
   type Mode, type PackIndexEntry, type RegionId, type RoomConfig,
 } from '../rooms/index.js';
 import { account, cvars, settings, type AccountState } from '../settings/index.js';
 import { h, clear } from './dom.js';
 import { pixelText } from './pixelfont.js';
 import type { MenuCtx, MenuDeps, PlayRequest, Screen, ScreenId } from './types.js';
-import { serversScreen } from './servers.js';
+import { lobbyScreen } from './lobby.js';
 import { hostScreen } from './host.js';
 import { playerScreen } from './player.js';
 import { settingsScreen } from './settings.js';
-import { paksScreen } from './paks.js';
 
-export type { PlayRequest, MenuDeps, IdPakLoader } from './types.js';
+export type { PlayRequest, MenuDeps } from './types.js';
 export { account } from '../settings/index.js';
 export { roomFromHash, roomLink } from '../rooms/index.js';
 
 declare const __BUILD_REV__: string;
 const REV = typeof __BUILD_REV__ === 'string' ? __BUILD_REV__ : 'dev';
 
+/** The top bar's buttons; the servers (the lobby) are home, and Customize opens from the character. */
 const NAV: { id: ScreenId; label: string; hint: string }[] = [
-  { id: 'servers', label: 'Servers', hint: 'Find a game' },
   { id: 'host', label: 'Host', hint: 'Start your own server' },
-  { id: 'player', label: 'Player', hint: 'Name, colours, crosshair' },
   { id: 'settings', label: 'Settings', hint: 'Mouse, video, sound, keys' },
-  { id: 'paks', label: 'Quake paks', hint: 'Use your own Quake files' },
 ];
 
 interface Live {
@@ -117,20 +113,15 @@ export function showMenu(root: HTMLElement, deps: MenuDeps = {}): Promise<PlayRe
   const navEl = h('nav.nav', { 'aria-label': 'Menu' });
   const main = h('main.work');
   const noticeEl = deps.notice ? h('div.notice', { role: 'alert' }, deps.notice) : null;
-
-  const quick = quickPanel(ctx);
   const accountEl = h('div.account');
+  const back = h('button.ghost.small.back', { type: 'button', hidden: true }, '← Servers');
+  back.addEventListener('click', () => select('servers'));
 
-  const rail = h('aside.rail',
-    {},
-    h('header.brand', {},
-      h('h1.wordmark', { title: 'Quake Town' }, pixelText('Quake\nTown', { px: 6, bold: true, className: 'wm-svg wm-stack' }), pixelText('Quake Town', { px: 4, bold: true, className: 'wm-svg wm-line' })),
-      h('p.tagline', {}, 'QuakeWorld in your browser. Pick a server and play.'),
-    ),
-    quick,
-    navEl,
-    accountEl,
-  );
+  const home = h('button.brand', { type: 'button', title: 'Quake Town: back to the servers' },
+    pixelText('Quake Town', { px: 3, bold: true, className: 'wm-svg' }));
+  home.addEventListener('click', () => select('servers'));
+
+  const topbar = h('header.topbar', {}, home, back, h('div.top-right', {}, navEl, accountEl));
 
   const footer = h('footer.foot', {},
     h('a', { href: 'LICENSE.txt', target: '_blank', rel: 'noopener' }, 'Licence (GPL-2.0-or-later)'),
@@ -140,24 +131,20 @@ export function showMenu(root: HTMLElement, deps: MenuDeps = {}): Promise<PlayRe
     h('span.tm', {}, 'Not affiliated with id Software. Game art: LibreQuake.'),
   );
 
-  shell.append(rail, h('div.workwrap', {}, noticeEl, main), footer, toastEl);
+  shell.append(topbar, h('div.workwrap', {}, noticeEl, main), footer, toastEl);
   clear(root);
   root.append(shell);
   root.classList.add('qt-menu-root');
 
   const screens = new Map<ScreenId, Screen>();
   const factories: Record<ScreenId, (c: MenuCtx) => Screen> = {
-    servers: serversScreen, host: hostScreen, player: playerScreen, settings: settingsScreen, paks: paksScreen,
+    servers: lobbyScreen, host: hostScreen, player: playerScreen, settings: settingsScreen,
   };
 
   live = { root, shell, promise, resolve, screens, current: null, cleanups: [] };
 
   for (const n of NAV) {
-    const b = h('button.nav-item', { type: 'button', 'data-screen': n.id, title: n.hint },
-      h('span.cursor', { 'aria-hidden': 'true' }, pixelText('>', { px: 3, tone: 'current' })),
-      pixelText(n.label, { px: 3, tone: 'current', shadow: true, className: 'nav-px' }),
-      h('span.nav-hint', {}, n.hint),
-    );
+    const b = h('button.nav-item', { type: 'button', 'data-screen': n.id, title: n.hint }, n.label);
     b.addEventListener('click', () => select(n.id));
     navEl.append(b);
   }
@@ -177,6 +164,8 @@ export function showMenu(root: HTMLElement, deps: MenuDeps = {}): Promise<PlayRe
       b.classList.toggle('on', on);
       if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
     }
+    back.hidden = id === 'servers';
+    shell.dataset.screen = id;
     main.scrollTop = 0;
   }
 
@@ -188,15 +177,16 @@ export function showMenu(root: HTMLElement, deps: MenuDeps = {}): Promise<PlayRe
       accountEl.append(
         h('span.avatar', {}, s.session.username.charAt(0).toUpperCase()),
         h('span.who', {}, h('b', {}, s.session.username),
-          h('small', {}, s.note ?? (home === 'loading' ? 'Loading your settings…' : 'Settings saved to your ARRR account'))),
+          h('small', {}, s.note ?? (home === 'loading' ? 'Loading your settings…' : 'Signed in · settings saved'))),
         h('button.ghost.small', { type: 'button', onclick: () => void account.signOut() }, 'Sign out'),
       );
     } else if (s.status === 'signing-in') {
       accountEl.append(h('span.avatar.guest', {}, '…'), h('span.who', {}, h('b', {}, 'Signing in…'), h('small', {}, 'Finish in the window that opened')));
     } else {
       accountEl.append(
-        h('span.who', {}, h('b', {}, `Playing as ${cvars.get('name')}`),
-          h('small', {}, s.note ?? 'Sign in to keep your name and settings on every device')),
+        h('span.avatar.guest', {}, cvars.get('name').charAt(0).toUpperCase() || '?'),
+        h('span.who', { title: 'Sign in to keep your name and settings on every device' }, h('b', {}, cvars.get('name')),
+          h('small', {}, s.note ?? 'Guest · not signed in')),
         h('button.small', { type: 'button', onclick: () => void account.signIn() }, 'Sign in with ARRR'),
       );
     }
@@ -231,45 +221,6 @@ export function hideMenu(): void {
   live.shell.remove();
   live.root.classList.remove('qt-menu-root');
   live = null;
-}
-
-// ---------------------------------------------------------------------------- quick play
-
-function quickPanel(ctx: MenuCtx): HTMLElement {
-  const modeSel = h('select', { 'aria-label': 'Mode' }, ...MODE_ORDER.map((m) => h('option', { value: m }, MODES[m].label)));
-  const regionSel = h('select', { 'aria-label': 'Region' },
-    h('option', { value: 'auto' }, `Nearest (${REGIONS.find((r) => r.id === homeRegion())!.short})`),
-    ...REGIONS.map((r) => h('option', { value: r.id }, r.label)));
-  modeSel.value = ctx.quickMode();
-  regionSel.value = cvars.get('qt_region');
-  modeSel.addEventListener('change', () => cvars.set('qt_quickmode', modeSel.value));
-  regionSel.addEventListener('change', () => cvars.set('qt_region', regionSel.value));
-
-  const go = h('button.cta', { type: 'button' }, 'Quick play');
-  go.addEventListener('click', async () => {
-    go.disabled = true;
-    go.textContent = 'Finding a server…';
-    const res = await fetchServers({ central: ctx.deps.central, index: ctx.index() });
-    go.disabled = false;
-    go.textContent = 'Quick play';
-    const row = quickPlay(res.rows, ctx.region(), ctx.quickMode(), ctx.index());
-    if (!row) { ctx.toast(`No maps for ${MODES[ctx.quickMode()].label} in this build yet.`); return; }
-    ctx.join(row.roomId, row.config, { direct: true });
-  });
-
-  const practice = h('button.ghost.small', { type: 'button' }, 'Practice offline with bots');
-  practice.addEventListener('click', () => {
-    const mode = ctx.quickMode() === 'duel' ? 'ffa' : ctx.quickMode();
-    const c = standingConfig(ctx.region(), mode, 1, ctx.index()) ?? standingConfig(ctx.region(), 'ffa', 1)!;
-    const config: RoomConfig = { ...c, name: 'Practice', standing: false, bots: true, region: null };
-    ctx.play({ roomId: encodeRoomId(config), config, offline: true });
-  });
-
-  return h('section.quick', { 'aria-label': 'Quick play' },
-    go,
-    h('div.quick-opts', {}, modeSel, regionSel),
-    practice,
-  );
 }
 
 // ---------------------------------------------------------------------------- join dialog

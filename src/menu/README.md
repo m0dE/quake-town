@@ -36,22 +36,20 @@ interface MenuDeps {
   renderPreview?: (canvas: HTMLCanvasElement, look: PlayerLook, t: number) => void;
                                              // renderer's renderCharacterPreview(canvas, vfs, look, t)
                                              // bound to the VFS; absent → a drawn placeholder
-  idPaks?: IdPakLoader;                      // content part's id-pak loader (see below)
   cacheLocalPack?: (file: File) => Promise<{ id: string; name: string; bytes: number }>;
                                              // host's local .pk3/.pak → cached by sha256 (content part)
-  models?: () => string[];                   // Player screen model list (default ['player'])
+  models?: () => string[];                   // Customize screen model list (default ['player'])
   skins?: () => string[];                    // Player screen skin list (default ['base'])
 }
 
 // PlayerLook (src/settings) = { model, skin, topcolor, bottomcolor } — the cvar values. The
 // renderer's PlayerLook differs; adapt in main.ts (docs/proposals/menu.md has the snippet).
-
-interface IdPakLoader {
-  status(): Promise<{ loaded: boolean; files: { name: string; bytes: number }[] }>;
-  load(files: File[]): Promise<{ ok: boolean; message: string }>;   // stores in IndexedDB
-  forget(): Promise<void>;
-}
 ```
+
+Layout: a top bar (wordmark, Host, Settings, the ARRR sign-in status), then the lobby —
+your character on the left with **Customize** under it (opens the name / colours / crosshair
+screen), quick play and the server table on the right. Selecting a server shows its **Join**
+button at the end of its row; double-click or Enter joins too.
 
 Also exported from `./index.js`:
 

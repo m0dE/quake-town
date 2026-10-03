@@ -1,5 +1,5 @@
 /**
- * The Player screen's character preview.
+ * The character preview, on the start screen and the Customize screen.
  *
  * When the renderer's `renderCharacterPreview` is wired (deps.renderPreview), the 3D model
  * is drawn. Until then this placeholder draws a pixel-art ranger in the chosen shirt and
@@ -7,7 +7,8 @@
  *
  * Licence: GPL-2.0-or-later.
  */
-import { rowRamp, type PlayerLook } from '../settings/index.js';
+import { playerLook, rowRamp, type PlayerLook } from '../settings/index.js';
+import type { MenuDeps } from './types.js';
 
 export function drawPlaceholder(canvas: HTMLCanvasElement, look: PlayerLook, t: number, turn = 0): void {
   const ctx = canvas.getContext('2d');
@@ -84,4 +85,45 @@ export function drawPlaceholder(canvas: HTMLCanvasElement, look: PlayerLook, t: 
   }
   // gun on the near side
   if ((side > 0) !== facing) px(gunX, 19, 3, 12, '#1d1915');
+}
+
+/**
+ * A turning character canvas: the renderer's 3D model when `deps.renderPreview` is wired,
+ * the placeholder otherwise. Drag turns it. `start()` / `stop()` run the animation.
+ */
+export function characterView(deps: MenuDeps, className = 'preview'): { canvas: HTMLCanvasElement; start(): void; stop(): void } {
+  const canvas = document.createElement('canvas');
+  canvas.className = className;
+  canvas.width = 360;
+  canvas.height = 480;
+  canvas.setAttribute('aria-label', 'Your character');
+  let raf = 0;
+  let turn = 0;
+  let dragX: number | null = null;
+  canvas.addEventListener('pointerdown', (e) => { dragX = e.clientX; canvas.setPointerCapture(e.pointerId); });
+  canvas.addEventListener('pointermove', (e) => { if (dragX !== null) { turn += (e.clientX - dragX) / 80; dragX = e.clientX; } });
+  canvas.addEventListener('pointerup', () => { dragX = null; });
+
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const t0 = performance.now();
+  const frame = (): void => {
+    const t = reduce ? 0.9 : (performance.now() - t0) / 1000;
+    const look = playerLook();
+    if (deps.renderPreview) {
+      // The renderer sizes its own WebGL canvas; `t + turn` turns the model.
+      deps.renderPreview(canvas, look, t + turn);
+    } else {
+      const dpr = Math.min(2, devicePixelRatio || 1);
+      const w = Math.round(canvas.clientWidth * dpr);
+      const hh = Math.round(canvas.clientHeight * dpr);
+      if (w && hh && (canvas.width !== w || canvas.height !== hh)) { canvas.width = w; canvas.height = hh; }
+      drawPlaceholder(canvas, look, t, turn);
+    }
+    raf = requestAnimationFrame(frame);
+  };
+  return {
+    canvas,
+    start() { cancelAnimationFrame(raf); raf = requestAnimationFrame(frame); },
+    stop() { cancelAnimationFrame(raf); },
+  };
 }
