@@ -752,7 +752,7 @@ export class Game {
 
     // --- camera
     const cam = f.camera;
-    cam.fov = cv.num('fov') || 90;
+    cam.fov = cv.num('fov') || 130;
     let viewmodelBob = 0;
     const spectating = this.mySlot < 0 && !this.demo;
     let drawCv: Int32Array | null = null;
