@@ -1,0 +1,12 @@
+import { chromium } from '/app/data/home/arrr-mono/node_modules/playwright/index.mjs';
+const url = process.argv[2];
+const browser = await chromium.launch({ executablePath: '/root/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome', args: ['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader'] });
+const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+page.on('pageerror', (e) => console.log('pageerror', e.message, e.stack?.split('\n').slice(0,4).join(' | ')));
+page.on('response', (r) => { if (r.status() >= 400) console.log('HTTP', r.status(), r.url()); });
+page.on('console', (m) => console.log('console', m.type(), m.text().slice(0, 300)));
+await page.goto(url);
+await page.waitForTimeout(Number(process.argv[3] ?? 15000));
+console.log('debug', await page.evaluate(() => JSON.stringify(window.__game?.debug?.() ?? null)));
+await page.screenshot({ path: process.argv[4] ?? '/tmp/peek.png' });
+await browser.close();

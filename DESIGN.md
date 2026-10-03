@@ -359,7 +359,7 @@ as the `qtdm` pack. Modes selected by serverinfo `mode`:
 - `duel` — 1on1, deathmatch 3 (the competitive QW duel rule), teamplay 0,
   timelimit 10, ready-up + countdown, overtime 3 min on a tie (sudden death if
   serverinfo `overtime` = "sd").
-- `2on2` — teamplay 2 (no team damage to health, armor yes), deathmatch 3,
+- `2on2` — teamplay 2 (full team damage, as id's qw-qc and KTX), deathmatch 3,
   timelimit 10; `4on4` — teamplay 2, **deathmatch 1** (weapons are taken and respawn,
   the 4on4 rule), timelimit 20. Auto-team red/blue, ready-up + countdown.
 - `ctf` — ThreeWave-style CTF, teamplay 1, flags at `item_flag_team1/2`, capture 15,
@@ -427,8 +427,10 @@ files are loaded by the renderer only.
   optional URL), password check (8 hex of sha256(salt + password), or none),
   standing-server flag. Undecodable ids are not listed.
 - Every client derives the world from the decoded config deterministically: config →
-  serverinfo infostring (`\mode\duel\deathmatch\1\teamplay\0\timelimit\10\fraglimit\0
-  \maxclients\2\bots\0\rotation\qt_aero qt_dm6\hostname\…`) → `world_new`.
+  serverinfo infostring (`\mode\duel\timelimit\10\fraglimit\0\maxclients\2\bots\0
+  \rotation\qt_aero qt_tower\hostname\…`; always include timelimit and fraglimit;
+  the mod derives deathmatch/teamplay from `mode`; every key the mod reads is listed in
+  `mod/qtdm/README.md`) → `world_new`.
 - The **server list**: name, mode, map (first of rotation; the live map is not
   knowable without joining), players/max (humans from client count; bots shown as
   "+N bots" estimate = max − humans when bots are on), ping (RTT to the room's

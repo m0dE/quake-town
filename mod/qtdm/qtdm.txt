@@ -1,0 +1,18 @@
+qtdm - the Quake Town default mod
+
+QuakeWorld deathmatch as id shipped it (id Software's qw-qc, GPL-2.0-or-later:
+weapons, damage, armor, item timings, knockback and rocket jumps unchanged),
+plus match modes picked by the serverinfo key "mode":
+
+  ffa   deathmatch 3, fraglimit 30, timelimit 15, no ready-up
+  duel  deathmatch 3, timelimit 10, ready-up, overtime on a tie
+  2on2  deathmatch 3, teamplay 2, timelimit 10, auto-team red/blue
+  4on4  deathmatch 1, teamplay 2, timelimit 20, auto-team red/blue
+  ctf   ThreeWave-style capture the flag, teamplay 1, timelimit 20
+  ca    Clan Arena: rounds, full kit, no items, first to 7 rounds
+
+Console commands: ready, break, team red|blue, kill.
+Serverinfo keys: mode, timelimit, fraglimit, overtime (minutes or "sd"),
+capturelimit, rounds, roundtime (seconds), rotation (space-separated maps).
+
+Source: mod/qtdm in the Quake Town repository (GPL-2.0-or-later).

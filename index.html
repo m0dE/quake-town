@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Quake Town</title>
+  <meta name="description" content="QuakeWorld deathmatch in the browser: open a link, pick a server, play.">
+  <link rel="preload" href="qtsim.wasm" as="fetch" type="application/wasm" crossorigin>
+</head>
+<body>
+  <div id="app">
+    <div id="game"></div>
+    <div id="menu"></div>
+    <div id="loading" class="hidden"><div id="loading-text">Loading</div></div>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

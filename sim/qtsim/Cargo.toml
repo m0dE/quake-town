@@ -10,7 +10,12 @@ description = "Quake Town simulation: a deterministic port of the QuakeWorld ser
 crate-type = ["cdylib", "rlib"]
 path = "src/lib.rs"
 
+[features]
+default = ["vm"]
+vm = ["dep:qcvm"]
+bots = ["vm", "dep:qtbots"]
+
 [dependencies]
 libm = "0.2"
-qcvm = { path = "../qcvm" }
-qtbots = { path = "../qtbots" }
+qcvm = { path = "../qcvm", optional = true }
+qtbots = { path = "../qtbots", optional = true }

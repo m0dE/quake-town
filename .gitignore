@@ -4,3 +4,7 @@ sim/target/
 .cache/
 test-results/
 *.log
+export/
+# churn during development; committed at release checkpoints
+public/packs/*.pk3
+docs/shots/
