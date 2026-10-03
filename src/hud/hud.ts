@@ -144,8 +144,10 @@ export class Hud {
         this.sbar.matchStats(d, st.rows, st.teams, st.teamplay, this.matchHeadline(st));
       } else {
         if (st.cv && !st.spectator) this.crosshair(d, st.cv);
+        let scores = st.showScores;
         if (st.cv) {
           const dead = st.cv[CV.deadflag] !== 0 || st.cv[CV.health] <= 0;
+          if (dead && !st.spectator) scores = true;
           if (modern) this.modern(d, st.cv, st);
           else if (this.sbar.ok && !(st.showScores || dead)) this.sbar.draw(d, st.cv, st.time, st.time < this.faceUntil, st.rows, this.cvars.num('viewsize') || 100, this.cvars.num('cl_hudswap') !== 0);
           if (st.showScores || (dead && !st.spectator)) this.sbar.scoreboard(d, st.rows, st.teams, st.teamplay, this.scoreTitle(st));
@@ -155,7 +157,8 @@ export class Hud {
           else if (!st.cv) this.sbar.drawSpectator(d, 'SPECTATOR MODE', st.specLine);
           else d.string(Math.floor((d.w - st.specLine.length * 8) / 2), d.h - 60, st.specLine, true);
         }
-        this.matchClock(d, st);
+        // The scoreboard's title plate sits where the clock does; the board carries its own.
+        if (!scores) this.matchClock(d, st);
         this.killFeed(d, st.now);
       }
       this.centerString(d, st.now);
@@ -169,7 +172,11 @@ export class Hud {
   private scoreTitle(st: HudState): string {
     const m = st.match;
     if (!m) return '';
-    const mode = m.mode.toUpperCase();
+    let mode = m.mode.toUpperCase();
+    if ((m.phase === PHASE_PLAYING || m.phase === PHASE_OVERTIME) && m.left >= 0) {
+      const t = Math.max(0, Math.ceil(m.left));
+      mode += `  ${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+    }
     if (st.teamplay && m.phase >= PHASE_PLAYING) return `${mode}  ${m.score1} : ${m.score2}`;
     return mode;
   }
