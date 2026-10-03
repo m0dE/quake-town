@@ -73,6 +73,7 @@ float(float t, entity ignore) Team_Count =
 void(entity p, float t) Team_Set =
 {
 	p.qteam = t;
+	p.team = t;             // QW's .team too (1 red, 2 blue): engine aim, bots
 	setinfo_guard = TRUE;
 	if (t == TEAM_RED)
 	{

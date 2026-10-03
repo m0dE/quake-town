@@ -39,4 +39,4 @@ pub use world::World;
 pub use qcvm;
 
 /// Bumped on any change to behaviour or layout (ABI `sim_version`).
-pub const SIM_VERSION: u32 = 1;
+pub const SIM_VERSION: u32 = 2;

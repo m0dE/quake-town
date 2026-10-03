@@ -265,6 +265,7 @@ void(float t) CTF_SpawnFlag =
 		return;
 	}
 	self.flagteam = t;
+	self.team = t;          // QW's .team: the flag belongs to that team
 	if (t == TEAM_RED)
 	{
 		self.netname = "RED flag";

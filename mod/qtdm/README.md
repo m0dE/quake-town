@@ -45,7 +45,9 @@ than half the humans stop it), `team red|blue` (warmup only, may not unbalance),
 (show), `kill`.
 
 Teams: red = team 1 (colours 4/4), blue = team 2 (13/13), written into userinfo `team`,
-`topcolor`, `bottomcolor`. CTF carrier: `EF_FLAG1` = carries the red flag, `EF_FLAG2` =
+`topcolor`, `bottomcolor`, and QW's `.team` field = 1 red / 2 blue / 0 none on players
+(also on the CTF flags: `item_flag_team1` has `.team` 1, `item_flag_team2` has 2). CTF
+players always spawn at a free `info_player_team1/2` of their team, else at a DM spawn. CTF carrier: `EF_FLAG1` = carries the red flag, `EF_FLAG2` =
 the blue flag (draw `progs/flag.mdl` skin 0 / 1), items `IT_KEY1` / `IT_KEY2`.
 
 ## Events

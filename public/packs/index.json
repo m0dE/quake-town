@@ -550,11 +550,11 @@
   ]
  },
  {
-  "id": "8f091af12b7d37ad218c6a7c8d0b6d76a8c35b314d621746da92db1d62aed71e",
+  "id": "08e8187480c5ffc34bd88e6c77843208eaebd24f31794c7dfc50b551cb0665a2",
   "name": "qtdm",
   "kind": "mod",
-  "file": "qtdm-8f091af12b7d.pk3",
-  "bytes": 57928,
+  "file": "qtdm-08e8187480c5.pk3",
+  "bytes": 57887,
   "files": [
    "qtdm.txt",
    "qwprogs.dat"

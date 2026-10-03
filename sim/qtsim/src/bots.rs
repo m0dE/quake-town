@@ -201,6 +201,14 @@ mod imp {
         0
     }
 
+    fn is_static_brush(vm: &Vm, e: Ent) -> bool {
+        e < vm.num_edicts()
+            && !vm.is_free(e)
+            && vm.e_f(e, fld::SOLID) as i32 == SOLID_BSP
+            && vm.e_f(e, fld::MOVETYPE) as i32 == MOVETYPE_PUSH
+            && vm.e_fn(e, fld::THINK) == 0
+    }
+
     fn to_bt(t: crate::trace::Trace) -> qtbots::Trace {
         qtbots::Trace { fraction: t.fraction, endpos: t.endpos, normal: t.normal, allsolid: t.allsolid, startsolid: t.startsolid, ent: t.ent }
     }
@@ -283,13 +291,16 @@ mod imp {
         }
         fn trace_world(&mut self, start: Vec3, mins: Vec3, maxs: Vec3, end: Vec3) -> qtbots::Trace {
             let vm = &*self.vm;
+            // static brush entities (func_wall …) are collected once per map and
+            // re-checked on every trace, so a trace costs O(statics), not O(edicts)
+            if self.sv.static_brushes.is_none() {
+                let list: Vec<Ent> = (1..vm.num_edicts()).filter(|&e| is_static_brush(vm, e)).collect();
+                self.sv.static_brushes = Some(list);
+            }
+            let list = self.sv.static_brushes.take().unwrap_or_default();
             let mut best = self.sv.clip_world_only(vm, 0, &start, &mins, &maxs, &end);
-            for e in 1..vm.num_edicts() {
-                if vm.is_free(e)
-                    || vm.e_f(e, fld::SOLID) as i32 != SOLID_BSP
-                    || vm.e_f(e, fld::MOVETYPE) as i32 != MOVETYPE_PUSH
-                    || vm.e_fn(e, fld::THINK) != 0
-                {
+            for &e in &list {
+                if !is_static_brush(vm, e) {
                     continue;
                 }
                 let t = self.sv.clip_world_only(vm, e, &start, &mins, &maxs, &end);
@@ -299,6 +310,7 @@ mod imp {
                     best.startsolid |= started;
                 }
             }
+            self.sv.static_brushes = Some(list);
             to_bt(best)
         }
         fn point_contents(&self, p: Vec3) -> i32 {

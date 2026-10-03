@@ -551,9 +551,11 @@ per frame).
   `timelimit` and `fraglimit`. qt_pickup weapon ids are 20 + weapon impulse.
 - `public/packs/index.json` entries also carry `file` and `title`; `players` is
   `[min, max]` (`docs/proposals/content.md`).
-- Tick-rate measurement so far (game part, box at load 15–31): the dev node delivered
-  72.1 Hz of 77 (interval p50 13.3 ms, p99 25.9 ms, no gaps). To be re-measured on a quiet
-  box.
+- Tick-rate measurements (dev node on this 2-core box): at load 15–31 it delivered
+  72.1 Hz of 77; at load ~10, **76.3 Hz** over 12,657 ticks (interval p50 12.6 ms,
+  p99 22.2 ms, one 958 ms stall, 0 gaps) and pages received 76.8–77.5 Hz. 77 Hz stands.
+  Client cost: 276–286 µs per tick in the page (confirmed + predicted step + hash);
+  world_hash 51–81 µs, hashed every frame.
 
 ## Process
 

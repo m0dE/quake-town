@@ -116,6 +116,7 @@ impl World {
             clients: vec![Client::new(); maxclients],
             botsys: crate::bots::BotSys::new(maxclients),
             spawn_info: Vec::new(),
+            static_brushes: None,
             areanodes: Vec::new(),
             links: Vec::new(),
             max_edicts,
@@ -182,6 +183,7 @@ impl World {
         sv.intermission = None;
         sv.spawn_info = sv.serverinfo.encode();
         sv.botsys.new_map(sv.maxclients);
+        sv.static_brushes = None;
 
         // clear physics interaction links
         sv.clear_world();

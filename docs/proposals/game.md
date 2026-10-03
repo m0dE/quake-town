@@ -74,6 +74,26 @@ a worst case, not a target.
 | rollbacks / mispredictions per page | 800–944 / 130–343 in 150 s (pages drew at 0.2 fps: their beats ran late, inputs landed late) |
 | sim cost per tick in the page (4 slots, no bots) | 390–490 µs (`world_tick` + event copy) |
 
+**Second run (08:17, load ~10, `HASH_EVERY` = 1, engine with the cheaper hash):**
+3 pages, 150 s, 12,543 frames: **0 desyncs / 0 resyncs**, 12/12 cross-page hash checks
+agreed, 8,388–8,729 verdicts per page. Node rate measured by the Node client over
+12,657 ticks: **76.33 Hz**, mean 13.10 ms, p50 12.59, p90 15.67, p99 22.18, p99.9 41.15,
+one 958 ms stall, 61 intervals > 2 ticks, 15 > 3 ticks, 0 gaps. Tick arrival in the
+pages 76.8–77.5 Hz (p50 12.0–12.3, p99 42–48 ms). Sim cost in the page 276–286 µs per tick.
+Rollbacks 574–621 / mispredictions 88–115 per page, the pages still drawing at
+0.5 fps (3 pages in one headless Chromium).
+
+## 6. Renderer (headless frame rate)
+
+Offline, 1280×720, swiftshader: the 3D page draws **0.3–0.5 fps (2–5 s a frame)** with
+the main thread ~78 % idle (renderer CPU 15–40 ms a frame, sim 0.3–0.4 ms a tick): the
+GPU process is the bottleneck. `r_preset classic` gives 1.1 fps; `r_scale 0.5` did not
+help (0.9 fps) — check `resolutionScale` is applied. In the first seconds of a map,
+`getProgramInfoLog` was 39 % of main-thread time (shader programs still being linked
+as new models and effects appear): warm every material at `loadMap` like doom-arrr's
+prewarm frame. A plain 2D canvas page draws 16 fps on the same box, so headless judging
+of the 3D view needs a GPU.
+
 Reading: the node's timer held 72 of 77 Hz under that load with a tight p50 (13.3 ms)
 and a 26 ms p99; nothing here says 77 Hz is unsustainable on an idle node, but it
 should be re-measured on a quiet box (and on the production node) before DESIGN

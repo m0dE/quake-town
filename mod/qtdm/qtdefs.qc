@@ -60,7 +60,6 @@ float   overtime_count;
 .float  qt_break;
 .float  qteam;
 .float  ca_out;                 // Clan Arena: out of this round
-.float  ctf_teamspawn;          // next spawn at a team spawn point
 .entity carriedflag;            // CTF: the flag this player carries
 .float  ctf_lastreturn;         // CTF: time this player returned his flag
 .float  ctf_lastcarrierfrag;    // CTF: time this player fragged an enemy carrier

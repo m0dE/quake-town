@@ -327,10 +327,9 @@ entity() SelectSpawnPoint =
 	if (spot)
 		return spot;
 
-	// qt: CTF team spawns on joining and at match start
-	if (qt_mode == MODE_CTF && self.ctf_teamspawn)
+	// qt: CTF players spawn at their team's spawns whenever one is free
+	if (qt_mode == MODE_CTF)
 	{
-		self.ctf_teamspawn = FALSE;
 		if (self.qteam == TEAM_RED)
 			spot = SelectSpawnClass ("info_player_team1");
 		else if (self.qteam == TEAM_BLUE)
@@ -525,6 +524,7 @@ void() PutClientInServer =
 	self.invincible_time = 0;
 	self.ca_out = FALSE;
 	self.carriedflag = world;
+	self.team = self.qteam;         // qt: QW's .team = 1 red, 2 blue, 0 none
 
 	DecodeLevelParms ();
 

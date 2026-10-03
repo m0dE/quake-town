@@ -456,6 +456,7 @@ fn read_server(r: &mut R, progs: Arc<Progs>, maps: Vec<Arc<Map>>) -> Res<Server>
         clients,
         botsys,
         spawn_info,
+        static_brushes: None,
         areanodes: Vec::new(),
         links: Vec::new(),
         max_edicts: 0,

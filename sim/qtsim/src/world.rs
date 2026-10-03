@@ -216,6 +216,8 @@ pub struct Server {
     pub botsys: crate::bots::BotSys,
     /// serverinfo when this map was spawned (keys the bots' nav graph)
     pub spawn_info: Vec<u8>,
+    /// derived cache for the bots' static-world traces (not state)
+    pub static_brushes: Option<Vec<Ent>>,
 
     pub areanodes: Vec<AreaNode>,
     pub links: Vec<Link>,

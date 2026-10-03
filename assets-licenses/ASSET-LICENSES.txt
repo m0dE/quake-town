@@ -39,5 +39,5 @@ Pack maps-lq-ff097b90a422.pk3 (maps, 9752 KB, sha256 ff097b90a422f0ccbcee64569da
   maps/lqdm13.bsp  "Death Provides No Return" by ZungryWare
   BSD-3-Clause (LibreQuake), shipped as released (compiled BSP + .lit).
 
-Pack qtdm-8f091af12b7d.pk3 (mod, 57 KB, sha256 8f091af12b7d37ad218c6a7c8d0b6d76a8c35b314d621746da92db1d62aed71e)
+Pack qtdm-08e8187480c5.pk3 (mod, 57 KB, sha256 08e8187480c5ffc34bd88e6c77843208eaebd24f31794c7dfc50b551cb0665a2)
   QuakeC mod compiled from mod/qtdm (port of id Software's qw-qc, GPL-2.0-or-later).

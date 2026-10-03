@@ -344,7 +344,6 @@ void() Match_RespawnAll =
 		if (p.qt_connected)
 		{
 			self = p;
-			self.ctf_teamspawn = TRUE;
 			SetNewParms ();
 			PutClientInServer ();
 		}
@@ -830,7 +829,6 @@ void() Match_PlayerConnected =
 	self.qt_break = FALSE;
 	self.ca_out = FALSE;
 	self.carriedflag = world;
-	self.ctf_teamspawn = TRUE;
 	self.ctf_lastreturn = self.ctf_lastcarrierfrag = -100;
 	self.frags = 0;
 	Stat_ResetPlayer (self);
@@ -864,6 +862,7 @@ void() Match_PlayerDisconnected =
 	self.qt_connected = FALSE;
 	self.qt_ready = FALSE;
 	self.qteam = TEAM_NONE;
+	self.team = 0;
 	self.ca_out = FALSE;
 	self.classname = "disconnected";
 	self.takedamage = DAMAGE_NO;
