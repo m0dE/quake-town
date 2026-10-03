@@ -73,7 +73,7 @@ export const DEFS: readonly CvarDef[] = [
 
   // ------------------------------------------------------------------ video
   e('r_preset', 'modern', ['classic', 'modern'], ['Classic', 'Modern'], 'video', 'Look', 'Classic: GL QuakeWorld as it was. Modern: bloom, tone mapping, dynamic lights.'),
-  f('fov', 90, 10, 170, 'video', 'Field of view', 'Horizontal field of view at 4:3, degrees (QW). Wider screens see more.', { step: 1 }),
+  f('fov', 130, 10, 170, 'video', 'Field of view', 'Horizontal field of view at 4:3, degrees (QW default 90; here 130, the widest the menu slider goes). Wider screens see more.', { step: 1 }),
   i('viewsize', 100, 30, 120, 'video', 'View size', '100 = full screen with status bar; 110/120 hide parts of the bar.', { step: 10 }),
   f('gamma', 1, 0.5, 1.5, 'video', 'Gamma', 'Lower is brighter (QW).', { step: 0.05 }),
   f('contrast', 1, 0.8, 2, 'video', 'Contrast', 'Overall brightness multiplier.', { step: 0.05 }),

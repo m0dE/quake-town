@@ -44,7 +44,7 @@ await test('QW defaults and names', () => {
   const cv = new CvarRegistry(DEFS);
   assert.equal(cv.get('sensitivity'), '3');
   assert.equal(cv.get('m_pitch'), '0.022');
-  assert.equal(cv.get('fov'), '90');
+  assert.equal(cv.get('fov'), '130');
   assert.equal(cv.get('crosshaircolor'), '79');
   assert.equal(cv.get('cl_bob'), '0.02');
   assert.equal(cv.get('cl_rollangle'), '2');
@@ -63,7 +63,7 @@ await test('set parses, clamps, rounds, refuses junk; listeners fire once per re
   assert.ok(cv.set('FOV', '110')); assert.equal(cv.get('fov'), '110');
   assert.ok(cv.set('fov', '110'));
   assert.ok(!cv.set('fov', 'wide'));
-  assert.deepEqual(seen, ['fov:90->170', 'fov:170->110']);
+  assert.deepEqual(seen, ['fov:130->170', 'fov:170->110']);
   assert.ok(cv.set('crosshair', 3.6)); assert.equal(cv.get('crosshair'), '4');
   assert.ok(cv.set('r_bloom', 'off')); assert.equal(cv.get('r_bloom'), '0'); assert.equal(cv.bool('r_bloom'), false);
   assert.ok(cv.set('hud_layout', 'MODERN')); assert.equal(cv.get('hud_layout'), 'modern');
