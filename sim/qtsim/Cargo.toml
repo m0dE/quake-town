@@ -1,0 +1,16 @@
+[package]
+name = "qtsim"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Quake Town simulation: a deterministic port of the QuakeWorld server + pmove, as wasm"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+path = "src/lib.rs"
+
+[dependencies]
+libm = "0.2"
+qcvm = { path = "../qcvm" }
+qtbots = { path = "../qtbots" }

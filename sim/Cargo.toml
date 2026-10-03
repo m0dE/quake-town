@@ -1,0 +1,21 @@
+[workspace]
+resolver = "2"
+members = ["qcvm", "qtsim", "qtbots"]
+
+[workspace.package]
+edition = "2021"
+license = "GPL-2.0-or-later"
+publish = false
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+debug = false
+strip = true
+panic = "abort"
+
+[profile.test]
+opt-level = 2
+debug-assertions = true
+overflow-checks = false

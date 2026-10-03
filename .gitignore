@@ -1,0 +1,6 @@
+node_modules/
+dist/
+sim/target/
+.cache/
+test-results/
+*.log
