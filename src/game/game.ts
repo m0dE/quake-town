@@ -802,6 +802,7 @@ export class Game {
     const r0 = performance.now();
     this.renderer?.draw(f);
     this.renderMs = performance.now() - r0;
+    this.adaptResolution(now);
     this.hudFrame(now, b, drawCv, t.others);
   }
 
@@ -809,6 +810,33 @@ export class Game {
   private readonly right = [0, 0, 0];
   private readonly up = [0, 0, 0];
   private renderMs = 0;
+
+  // ------------------------------------------------------------------ adaptive resolution
+  // r_dynres: the frame interval is the measure (it includes GPU time, which renderMs does
+  // not). Over 22 ms on average (under ~45 fps) the render scale steps down, under 14 ms it
+  // steps back up to r_scale. A vsynced 60 Hz display sits at 16.7 ms and never moves.
+  private dynScale = 1;
+  private dynLast = 0;
+  private dynSum = 0;
+  private dynCount = 0;
+  private adaptResolution(now: number): void {
+    const dt = this.dynLast ? now - this.dynLast : 0;
+    this.dynLast = now;
+    if (dt <= 0 || dt > 250) return; // first frame, or a hidden tab
+    this.dynSum += dt;
+    if (++this.dynCount < 30) return;
+    const avg = this.dynSum / this.dynCount;
+    this.dynSum = 0; this.dynCount = 0;
+    const c = this.opts.cvars;
+    const enabled = !c.has('r_dynres') || c.num('r_dynres') !== 0;
+    let next = enabled ? this.dynScale : 1;
+    if (enabled && avg > 22) next = Math.max(0.5, this.dynScale * 0.85);
+    else if (enabled && avg < 14) next = Math.min(1, this.dynScale * 1.1);
+    if (Math.abs(next - this.dynScale) < 0.01) return;
+    this.dynScale = next;
+    const user = c.has('r_scale') ? Math.max(0.25, Math.min(1, c.num('r_scale') || 1)) : 1;
+    this.renderer?.setSettings?.({ resolutionScale: user * next });
+  }
 
   private buildEntities(a: Snap, b: Snap, frac: number, selfEnts: { a: SelfSnap; b: SelfSnap; frac: number } | null, drawCv: Int32Array | null): void {
     const f = this.frame;

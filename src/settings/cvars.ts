@@ -78,6 +78,7 @@ export const DEFS: readonly CvarDef[] = [
   f('gamma', 1, 0.5, 1.5, 'video', 'Gamma', 'Lower is brighter (QW).', { step: 0.05 }),
   f('contrast', 1, 0.8, 2, 'video', 'Contrast', 'Overall brightness multiplier.', { step: 0.05 }),
   f('r_scale', 1, 0.25, 2, 'video', 'Render scale', 'Resolution multiplier; below 1 is faster.', { step: 0.05 }),
+  b('r_dynres', 1, 'video', 'Adaptive resolution', 'Lowers the render resolution while the frame rate is under 45 fps, and raises it back when there is headroom.'),
   b('r_bloom', 1, 'video', 'Bloom', 'Glow around bright lights.', { preset: true }),
   b('r_ssao', 0, 'video', 'Ambient occlusion', 'Contact shadows (SSAO). Costs frame time.', { preset: true }),
   b('r_tonemap', 1, 'video', 'Tone mapping', 'ACES filmic tone mapping.', { preset: true }),
