@@ -97,8 +97,11 @@ function init(canvas: HTMLCanvasElement, vfs: Vfs): PreviewState {
  * Draw the menu preview of `look` at time `t` (seconds; call every animation frame).
  * Cheap: one model draw + one shadow quad.
  */
+/** The preview's own slow turn at time `t`, degrees. */
+export function previewAutoYaw(t: number): number { return -30 + t * 24; }
+
 export function renderCharacterPreview(canvas: HTMLCanvasElement, vfs: Vfs, look: PlayerLook, t: number,
-  settings?: Pick<Partial<RenderSettings>, 'textureFilter' | 'modelLighting'>): void {
+  settings?: Pick<Partial<RenderSettings>, 'textureFilter' | 'modelLighting'>, yawDeg?: number): void {
   let s = states.get(canvas);
   if (!s || s.vfs !== vfs) { if (s) disposeCharacterPreview(canvas); s = init(canvas, vfs); states.set(canvas, s); }
   const w = canvas.clientWidth || canvas.width, h = canvas.clientHeight || canvas.height;
@@ -129,8 +132,9 @@ export function renderCharacterPreview(canvas: HTMLCanvasElement, vfs: Vfs, look
   const fa = isPlayer ? 12 + (Math.floor(ft) % 5) : 0, fb = isPlayer ? 12 + ((Math.floor(ft) + 1) % 5) : 0;
   const pa = mdlPose(model.mdl, fa, t), pb = mdlPose(model.mdl, fb, t);
   (mat.uniforms.uPose.value as THREE.Vector4).set(pa, pb, ft - Math.floor(ft), model.rows);
-  // three-quarter front view at t = 0, turning slowly to the left
-  const yaw = -30 + t * 24;
+  // three-quarter front view at t = 0, turning slowly to the left — unless the caller holds
+  // the model at an angle (the player turned it by hand)
+  const yaw = yawDeg ?? previewAutoYaw(t);
   // feet on the ground: put the lowest point of the model at z = -24
   entityMatrix(s.mesh.matrixWorld, 0, 0, 0, 0, yaw, 0);
   mat.uniforms.uSkin.value = model.skin(look.skin, mdlSkinImage(model.mdl, look.skin, t), ((look.top & 15) << 4) | (look.bottom & 15));

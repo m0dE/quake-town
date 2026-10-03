@@ -21,7 +21,8 @@ export interface MenuDeps {
   /** One line shown at the top (e.g. why the player is back in the menu). */
   notice?: string;
   packIndex?: () => Promise<PackIndexEntry[]>;
-  renderPreview?: (canvas: HTMLCanvasElement, look: PlayerLook, t: number) => void;
+  /** `yaw` (degrees) holds the model at that angle; omitted, it turns by itself. */
+  renderPreview?: (canvas: HTMLCanvasElement, look: PlayerLook, t: number, yaw?: number) => void;
   cacheLocalPack?: (file: File) => Promise<{ id: string; name: string; bytes: number }>;
   /** Models and skins to offer on the Customize screen (default: player / base). */
   models?: () => string[];

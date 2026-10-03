@@ -298,7 +298,7 @@ function leave(reason = ''): void {
   void showMenu(reason);
 }
 
-let previewModule: { renderCharacterPreview: (c: HTMLCanvasElement, v: Vfs, look: { model?: string; skin: number; top: number; bottom: number }, t: number) => void } | null = null;
+let previewModule: { renderCharacterPreview: (c: HTMLCanvasElement, v: Vfs, look: { model?: string; skin: number; top: number; bottom: number }, t: number, settings?: undefined, yaw?: number) => void } | null = null;
 
 async function showMenu(notice = ''): Promise<void> {
   menuRoot.classList.remove('hidden');
@@ -314,9 +314,9 @@ async function showMenu(notice = ''): Promise<void> {
       packIndex: () => loader.index() as never,
       cacheLocalPack: (file) => content.cacheLocalPack(file),
       ...(previewModule ? {
-        renderPreview: (canvas: HTMLCanvasElement, look: { model: string; skin: string; topcolor: number; bottomcolor: number }, t: number) => previewModule!.renderCharacterPreview(canvas, content.vfs, {
+        renderPreview: (canvas: HTMLCanvasElement, look: { model: string; skin: string; topcolor: number; bottomcolor: number }, t: number, yaw?: number) => previewModule!.renderCharacterPreview(canvas, content.vfs, {
           model: `progs/${look.model || 'player'}.mdl`, skin: Number.parseInt(look.skin, 10) || 0, top: look.topcolor, bottom: look.bottomcolor,
-        }, t),
+        }, t, undefined, yaw),
       } : {}),
       models: () => content.vfs.list('progs/').filter((p) => /^progs\/player\w*\.mdl$/.test(p)).map((p) => p.slice(6, -4)),
     });

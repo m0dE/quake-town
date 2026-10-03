@@ -10,6 +10,9 @@
 import { playerLook, rowRamp, type PlayerLook } from '../settings/index.js';
 import type { MenuDeps } from './types.js';
 
+/** The renderer preview's own turn (render/preview.ts previewAutoYaw), degrees. */
+const autoYaw = (t: number): number => -30 + t * 24;
+
 export function drawPlaceholder(canvas: HTMLCanvasElement, look: PlayerLook, t: number, turn = 0): void {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
@@ -100,24 +103,41 @@ export function characterView(deps: MenuDeps, className = 'preview'): { canvas: 
   let raf = 0;
   let turn = 0;
   let dragX: number | null = null;
-  canvas.addEventListener('pointerdown', (e) => { dragX = e.clientX; canvas.setPointerCapture(e.pointerId); });
-  canvas.addEventListener('pointermove', (e) => { if (dragX !== null) { turn += (e.clientX - dragX) / 80; dragX = e.clientX; } });
+  // Once the player turns the model by hand it stays where they leave it: no more auto turn.
+  let heldYaw: number | null = null;
+  let heldT = 0;
+  let now = 0;
+  canvas.addEventListener('pointerdown', (e) => {
+    dragX = e.clientX;
+    canvas.setPointerCapture(e.pointerId);
+    if (heldYaw === null) { heldT = now; heldYaw = autoYaw(now); }
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (dragX === null) return;
+    const dx = e.clientX - dragX;
+    dragX = e.clientX;
+    turn += dx / 80;
+    if (heldYaw !== null) heldYaw += dx * 0.5;
+  });
   canvas.addEventListener('pointerup', () => { dragX = null; });
+  canvas.addEventListener('pointercancel', () => { dragX = null; });
 
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const t0 = performance.now();
   const frame = (): void => {
     const t = reduce ? 0.9 : (performance.now() - t0) / 1000;
+    now = t;
     const look = playerLook();
     if (deps.renderPreview) {
-      // The renderer sizes its own WebGL canvas; `t + turn` turns the model.
-      deps.renderPreview(canvas, look, t + turn);
+      // The renderer sizes its own WebGL canvas. `t` animates (idle stance); the yaw turns by
+      // itself until the player drags it, then holds where they left it.
+      deps.renderPreview(canvas, look, t, heldYaw ?? undefined);
     } else {
       const dpr = Math.min(2, devicePixelRatio || 1);
       const w = Math.round(canvas.clientWidth * dpr);
       const hh = Math.round(canvas.clientHeight * dpr);
       if (w && hh && (canvas.width !== w || canvas.height !== hh)) { canvas.width = w; canvas.height = hh; }
-      drawPlaceholder(canvas, look, t, turn);
+      drawPlaceholder(canvas, look, heldYaw === null ? t : heldT, turn);
     }
     raf = requestAnimationFrame(frame);
   };
