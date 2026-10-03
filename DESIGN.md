@@ -36,8 +36,8 @@ and says so in its report.
 - **Name:** "QUAKE" is id/ZeniMax's trademark. Player-facing title **Quake Town**.
   Code identifiers may say `quake`/`qw`.
 - The published bundle carries `LICENSE.txt`, `ASSET-LICENSES.txt` (LibreQuake BSD-3 +
-  credits + per-map credits) and `source.zip` (full corresponding source, GPL §3(a)),
-  linked from the menu footer.
+  credits + per-map credits); the menu footer links them and the source on GitHub
+  (https://github.com/m0dE/quake-town).
 
 ## Layout and ownership
 

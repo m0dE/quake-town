@@ -126,7 +126,7 @@ export function showMenu(root: HTMLElement, deps: MenuDeps = {}): Promise<PlayRe
   const footer = h('footer.foot', {},
     h('a', { href: 'LICENSE.txt', target: '_blank', rel: 'noopener' }, 'Licence (GPL-2.0-or-later)'),
     h('a', { href: 'ASSET-LICENSES.txt', target: '_blank', rel: 'noopener' }, 'Art and map credits'),
-    h('a', { href: 'source.zip', download: '' }, 'Source code'),
+    h('a', { href: 'https://github.com/m0dE/quake-town', target: '_blank', rel: 'noopener' }, 'Source code'),
     h('span.rev', { title: 'Build' }, `build ${REV}`),
     h('span.tm', {}, 'Not affiliated with id Software. Game art: LibreQuake.'),
   );
