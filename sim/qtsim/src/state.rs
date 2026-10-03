@@ -145,7 +145,7 @@ fn r_cmd(r: &mut R) -> Res<UserCmd> {
 }
 /// Everything in Server that is state, in a fixed order (used by both serialize and
 /// hash so the two can never disagree about what the state is).
-fn write_server(w: &mut W, sv: &Server) {
+fn write_server(w: &mut W, sv: &Server, for_hash: bool) {
     w.u32(sv.map_id);
     w.u64(sv.seed);
     w.u32(sv.tick_count);
@@ -185,10 +185,12 @@ fn write_server(w: &mut W, sv: &Server) {
             w.i32(*s);
         }
     }
-    w.u32(sv.links.len() as u32);
-    for l in &sv.links {
-        w.u32(l.prev);
-        w.u32(l.next);
+    if !for_hash {
+        w.u32(sv.links.len() as u32);
+        for l in &sv.links {
+            w.u32(l.prev);
+            w.u32(l.next);
+        }
     }
     w.i32(sv.lastcheck);
     w.f64(sv.lastchecktime);
@@ -235,9 +237,29 @@ fn write_server(w: &mut W, sv: &Server) {
         None => w.u32(0),
     }
     w.bytes(&sv.spawn_info);
-    let mut b = Vec::new();
-    sv.botsys.serialize(&mut b);
-    w.bytes(&b);
+    if !for_hash {
+        let mut b = Vec::new();
+        sv.botsys.serialize(&mut b);
+        w.bytes(&b);
+    }
+}
+
+/// 4-lane 64-bit multiply-xor mixing over words (independent chains, so it runs at
+/// several words per cycle); fed into the StateHasher as one u64
+fn lanes_hash(words: impl Iterator<Item = u32>, n: usize) -> u64 {
+    const K: [u64; 4] = [0x9e37_79b9_7f4a_7c15, 0xc2b2_ae3d_27d4_eb4f, 0x1656_67b1_9e37_79f9, 0x85eb_ca77_c2b2_ae63];
+    let mut l = [K[0] ^ n as u64, K[1], K[2], K[3]];
+    let mut i = 0usize;
+    for w in words {
+        let k = i & 3;
+        l[k] = (l[k] ^ w as u64).wrapping_mul(0xff51_afd7_ed55_8ccd).rotate_left(29);
+        i += 1;
+    }
+    let mut h = l[0];
+    for x in &l[1..] {
+        h = (h ^ x.rotate_left(17)).wrapping_mul(0xc4ce_b9fe_1a85_ec53);
+    }
+    h ^ (h >> 31)
 }
 
 impl World {
@@ -246,7 +268,7 @@ impl World {
         let mut w = W { b: out };
         w.u32(MAGIC);
         w.u32(crate::SIM_VERSION);
-        write_server(&mut w, &self.sv);
+        write_server(&mut w, &self.sv, false);
         self.vm.serialize(out);
     }
 
@@ -271,11 +293,23 @@ impl World {
 
     /// world_hash: the whole state, NaN-canonical, events excluded.
     pub fn hash(&self) -> u32 {
-        let mut buf = Vec::with_capacity(4096);
-        let mut w = W { b: &mut buf };
-        write_server(&mut w, &self.sv);
+        thread_local! {
+            static BUF: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
+        }
         let mut h = StateHasher::new();
-        h.bytes(&buf);
+        BUF.with(|b| {
+            let mut buf = b.borrow_mut();
+            buf.clear();
+            let mut w = W { b: &mut buf };
+            write_server(&mut w, &self.sv, true);
+            let n = buf.len();
+            buf.resize((n + 3) & !3, 0);
+            let words = buf.chunks_exact(4).map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]));
+            h.u64(lanes_hash(words, n));
+        });
+        let links = &self.sv.links;
+        h.u64(lanes_hash(links.iter().flat_map(|l| [l.prev, l.next]), links.len()));
+        h.u64(self.sv.botsys.hash());
         self.vm.hash_into(&mut h);
         h.finish32()
     }

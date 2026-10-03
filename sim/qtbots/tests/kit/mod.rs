@@ -188,6 +188,7 @@ impl TestWorld {
                     b"spawnflags" => e.spawnflags = String::from_utf8_lossy(v).parse().unwrap_or(0),
                     b"speed" => e.speed = String::from_utf8_lossy(v).parse().unwrap_or(0.0),
                     b"angles" => e.angles = Some(vec3(v)),
+                    b"height" => e.plat_low = -String::from_utf8_lossy(v).parse::<f32>().unwrap_or(0.0),
                     _ => {}
                 }
             }
@@ -236,7 +237,9 @@ impl TestWorld {
             if e.classname == b"func_plat" {
                 let h = e.maxs[2] - e.mins[2] - 8.0;
                 e.plat_high = 0.0;
-                e.plat_low = -h;
+                if e.plat_low == 0.0 {
+                    e.plat_low = -h;
+                }
                 e.solid = 4;
                 if e.targetname.is_empty() {
                     e.origin[2] = e.plat_low;
@@ -381,8 +384,10 @@ impl TestWorld {
             if e.solid != 1 || e.free {
                 continue;
             }
+            // SV_LinkEdict grows abs boxes by 1 (and items by 15 in x/y)
+            let grow = if e.classname.starts_with(b"item_") || e.classname.starts_with(b"weapon_") { [15.0, 15.0, 1.0] } else { [1.0; 3] };
             let (mn, mx) = (bsp::add(e.origin, e.mins), bsp::add(e.origin, e.maxs));
-            if (0..3).any(|k| pmx[k] < mn[k] || pmn[k] > mx[k]) {
+            if (0..3).any(|k| pmx[k] < mn[k] - grow[k] || pmn[k] > mx[k] + grow[k]) {
                 continue;
             }
             let cls = e.classname.clone();
@@ -457,9 +462,10 @@ impl TestWorld {
                 continue;
             }
             let (mn, mx) = (bsp::add(self.ents[i].origin, self.ents[i].mins), bsp::add(self.ents[i].origin, self.ents[i].maxs));
+            // QW plat_spawn_inside_trigger: inset 25 units, on top
             let rider = self.players.iter().any(|p| {
-                p.used && p.alive && p.pm.origin[0] > mn[0] - 16.0 && p.pm.origin[0] < mx[0] + 16.0 && p.pm.origin[1] > mn[1] - 16.0
-                    && p.pm.origin[1] < mx[1] + 16.0 && (p.pm.origin[2] - 24.0 - mx[2]).abs() < 4.0
+                p.used && p.alive && p.pm.origin[0] + 16.0 > mn[0] + 25.0 && p.pm.origin[0] - 16.0 < mx[0] - 25.0 && p.pm.origin[1] + 16.0 > mn[1] + 25.0
+                    && p.pm.origin[1] - 16.0 < mx[1] - 25.0 && (p.pm.origin[2] - 24.0 - mx[2]).abs() < 8.0
             });
             let e = &mut self.ents[i];
             match e.plat_state {
@@ -499,12 +505,21 @@ impl TestWorld {
                     continue;
                 }
                 let o = p.pm.origin;
-                let inxy = o[0] + 16.0 > mn[0] && o[0] - 16.0 < mx[0] && o[1] + 16.0 > mn[1] && o[1] - 16.0 < mx[1];
+                // (kit simplification: only players whose center is over the plat ride it)
+                let inxy = o[0] > mn[0] && o[0] < mx[0] && o[1] > mn[1] && o[1] < mx[1];
                 let feet = o[2] - 24.0;
                 let overlap = inxy && feet < mx[2] && o[2] + 32.0 > mn[2];
                 let riding = inxy && rising && (feet - top).abs() < 4.0;
                 if overlap || riding {
-                    p.pm.origin[2] = top + 24.0 + 0.03125;
+                    let np = [o[0], o[1], top + 24.0 + 0.03125];
+                    let head = self.bsp.models[0].headnode[1];
+                    if self.bsp.hull_point_contents(1, head, np) == -2 {
+                        // blocked (QW plat_crush): the plat goes back down
+                        e.plat_state = 3;
+                        e.origin[2] -= 150.0 * dt;
+                        continue;
+                    }
+                    p.pm.origin = np;
                     if p.pm.velocity[2] < 0.0 {
                         p.pm.velocity[2] = 0.0;
                     }

@@ -329,11 +329,44 @@ fn angle_vectors(a: Vec3) -> (Vec3, Vec3) {
     (fwd, right)
 }
 
+fn test_position(c: &Ctx, p: Vec3) -> bool {
+    for pe in c.phys.iter() {
+        let o = [p[0] - pe.origin[0], p[1] - pe.origin[1], p[2] - pe.origin[2]];
+        let head = c.bsp.models[pe.model].headnode[1];
+        if c.bsp.hull_point_contents(1, head, o) == -2 {
+            return false;
+        }
+    }
+    true
+}
+
+/// NudgePosition: snap to 1/8 and try small offsets if embedded.
+fn nudge(c: &Ctx, s: &mut PState) {
+    let base = s.origin;
+    for i in 0..3 {
+        s.origin[i] = ((s.origin[i] * 8.0) as i32) as f32 * 0.125;
+    }
+    let sign = [0.0f32, -1.0, 1.0];
+    for z in 0..3 {
+        for x in 0..3 {
+            for y in 0..3 {
+                let o = [base[0] + sign[x] / 8.0, base[1] + sign[y] / 8.0, base[2] + sign[z] / 8.0];
+                if test_position(c, o) {
+                    s.origin = o;
+                    return;
+                }
+            }
+        }
+    }
+    s.origin = base;
+}
+
 /// One PlayerMove with msec 13 (angles from the cmd, as SV_RunCmd does).
 pub fn player_move(bsp: &Bsp, phys: &[PhysEnt], s: &mut PState, cmd: &UserCmd) {
     s.angles = [qtbots::short2angle(cmd.pitch16), qtbots::short2angle(cmd.yaw16), 0.0];
     let (forward, right) = angle_vectors(s.angles);
     let c = Ctx { bsp, phys, frametime: 0.013, forward, right };
+    nudge(&c, s);
     categorize(&c, s);
     if s.velocity[2] < 0.0 {
         s.waterjumptime = 0.0;

@@ -347,19 +347,35 @@ void main() {
 }
 `;
 
-/** gl_flashblend: additive glow balls (R_RenderDlight), as soft discs. */
+/**
+ * gl_flashblend: R_RenderDlight's glow — a fan whose centre is pulled towards the viewer by
+ * the radius and whose rim (black) sits at the light, drawn additively.
+ */
+export const GLOW_VS = /* glsl */ `
+precision highp float;
+uniform mat4 viewMatrix, projectionMatrix;
+uniform vec3 uRight;
+uniform vec3 uUp;
+uniform vec3 uFwd;
+in vec3 position;          // ring: (cos, sin, 0); centre: (0, 0, 1)
+in vec4 iPos;              // light origin xyz, radius
+in vec4 iRect;
+in vec4 iTex;
+in vec4 iColor;
+out vec4 vColor;
+void main() {
+  float r = iPos.w;
+  vec3 p = iPos.xyz + (uRight * position.x + uUp * position.y) * r - uFwd * (position.z * r);
+  vColor = vec4(iColor.rgb * position.z, 0.0);
+  gl_Position = projectionMatrix * viewMatrix * vec4(p, 1.0);
+}
+`;
+
 export const GLOW_FS = /* glsl */ `
 precision highp float;
-in vec2 vUV;
 in vec4 vColor;
 layout(location = 0) out vec4 outColor;
-void main() {
-  vec2 c = vUV * 2.0 - 1.0;
-  float r = length(c);
-  if (r > 1.0) discard;
-  float a = 1.0 - r;
-  outColor = vec4(vColor.rgb * a, 0.0);
-}
+void main() { outColor = vColor; }
 `;
 
 // ------------------------------------------------------------------------------ post

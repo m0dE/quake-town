@@ -304,6 +304,16 @@ impl<'a, W: BotWorld> Builder<'a, W> {
         Some(q)
     }
 
+    /// Walking from `p` straight towards `center` (at p's height) touches the box mn..mx.
+    fn reaches_box(&mut self, p: Vec3, center: Vec3, mn: &Vec3, mx: &Vec3) -> bool {
+        let touch = |q: Vec3| (0..3).all(|k| q[k] + PLAYER_MAXS[k] + 1.0 >= mn[k] && q[k] + PLAYER_MINS[k] - 1.0 <= mx[k]);
+        if touch(p) {
+            return true;
+        }
+        let t = self.tr(p, [center[0], center[1], p[2]]);
+        touch(t.endpos)
+    }
+
     /// A jump pad: velocity `v` is applied every frame while the box touches the trigger;
     /// in the air the player may steer (QW air control: up to 30 u/s along the wish
     /// direction). Tries no steering and 8 steering directions, keeps the landing that
@@ -605,7 +615,7 @@ impl NavGraph {
                 for n in 0..b.nodes.len() as u32 {
                     let p = b.nodes[n as usize];
                     let inside = (0..3).all(|k| p[k] + PLAYER_MAXS[k] + 24.0 >= mn[k] && p[k] + PLAYER_MINS[k] - 24.0 <= mx[k]);
-                    if inside && n != dest {
+                    if inside && n != dest && b.reaches_box(p, center, mn, mx) {
                         b.add_link(n, dest, LinkKind::Teleport, center);
                     }
                 }
@@ -613,12 +623,19 @@ impl NavGraph {
             // jump pads: simulate the push from the nodes touching the trigger
             for (mn, mx, v) in &pushes {
                 let center = scale(add(*mn, *mx), 0.5);
-                let touching: Vec<u32> = (0..b.nodes.len() as u32)
+                let near: Vec<u32> = (0..b.nodes.len() as u32)
                     .filter(|&n| {
                         let p = b.nodes[n as usize];
                         (0..3).all(|k| p[k] + PLAYER_MAXS[k] + 8.0 >= mn[k] && p[k] + PLAYER_MINS[k] - 8.0 <= mx[k])
                     })
                     .collect();
+                let mut touching = Vec::new();
+                for n in near {
+                    let p = b.nodes[n as usize];
+                    if b.reaches_box(p, center, mn, mx) {
+                        touching.push(n);
+                    }
+                }
                 let mut starts: Vec<(i32, Vec3)> = Vec::new();
                 for &n in &touching {
                     let p = b.nodes[n as usize];
@@ -676,6 +693,18 @@ impl NavGraph {
                 forced_kind[i] = Some(LinkKind::Teleport);
             }
         }
+        // standing on a lowered plat's trigger (inset 25, QW plat_spawn_inside_trigger)
+        // starts it: such nodes keep only their Plat links
+        for (i, p) in b.nodes.iter().enumerate() {
+            for (mn, mx) in &plats {
+                let feet = p[2] - 24.0;
+                if p[0] > mn[0] + 25.0 - 16.0 && p[0] < mx[0] - 25.0 + 16.0 && p[1] > mn[1] + 25.0 - 16.0 && p[1] < mx[1] - 25.0 + 16.0
+                    && feet <= mx[2] + 8.0 && feet >= mn[2] - 64.0
+                {
+                    forced_kind[i] = Some(LinkKind::Plat);
+                }
+            }
+        }
         let mut has_kind = vec![false; b.nodes.len()];
         for l in &b.links {
             if forced_kind[l.from as usize] == Some(l.kind) {
@@ -692,10 +721,14 @@ impl NavGraph {
         let risky: Vec<bool> = b
             .nodes
             .iter()
-            .map(|p| pushes.iter().any(|(mn, mx, _)| near(*p, mn, mx)) || tele_links.iter().any(|(mn, mx, _)| near(*p, mn, mx)))
+            .map(|p| {
+                pushes.iter().any(|(mn, mx, _)| near(*p, mn, mx))
+                    || tele_links.iter().any(|(mn, mx, _)| near(*p, mn, mx))
+                    || plats.iter().any(|(mn, mx)| near(*p, mn, mx) && p[2] - 24.0 <= mx[2] + 8.0)
+            })
             .collect();
         for l in b.links.iter_mut() {
-            if risky[l.to as usize] && l.kind != LinkKind::Teleport && l.kind != LinkKind::Push && forced_kind[l.to as usize].is_none() {
+            if risky[l.to as usize] && l.kind != LinkKind::Teleport && l.kind != LinkKind::Push && l.kind != LinkKind::Plat {
                 l.cost += 300.0;
             }
         }

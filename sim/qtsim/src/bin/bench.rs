@@ -19,7 +19,8 @@ fn main() {
     let ticks: u32 = std::env::args().nth(1).and_then(|x| x.parse().ok()).unwrap_or(5000);
     let progs = qtsim::qcvm::Progs::load(&std::fs::read(qtsim::scenario::QW_PROGS).unwrap()).unwrap();
     println!("{:<8} {:>5} {:>10} {:>10} {:>9} {:>9} {:>10} {:>9}", "map", "bots", "µs/tick", "max wall", "QC ins/t", "hash µs", "clone µs", "ser KB");
-    for name in ["lqdm1", "lqdm3", "lqdm4", "lqdm6", "lqdm9"] {
+    for name in std::env::args().nth(2).map(|m| vec![m]).unwrap_or_else(|| ["lqdm1", "lqdm3", "lqdm4", "lqdm6", "lqdm9"].iter().map(|s| s.to_string()).collect()) {
+        let name = name.as_str();
         let m = qtsim::bsp::Map::load(name, &std::fs::read(format!("{}/{name}.bsp", qtsim::scenario::LQ_MAPS)).unwrap()).unwrap();
         let maps = vec![Arc::new(m)];
         for n in [8, 16] {
@@ -46,6 +47,19 @@ fn main() {
                 x ^= w.hash();
             }
             let hash_us = (cpu() - c1) * 1e6 / 2000.0;
+            let c3 = cpu();
+            for _ in 0..20000 {
+                x ^= w.vm.hash() as u32;
+            }
+            let vmhash_us = (cpu() - c3) * 1e6 / 20000.0;
+            let c4 = cpu();
+            let mut y = 0u64;
+            for _ in 0..20000 {
+                y ^= w.sv.botsys.hash();
+            }
+            let bothash_us = (cpu() - c4) * 1e6 / 20000.0;
+            std::hint::black_box(y);
+            println!("  (hash parts: vm {vmhash_us:.1} µs, bots {bothash_us:.2} µs; {} edicts, {} string bytes)", w.vm.num_edicts(), w.vm.string_bytes());
             let c2 = cpu();
             for _ in 0..2000 {
                 let c = w.clone();

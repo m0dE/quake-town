@@ -129,6 +129,7 @@ impl World {
         out[0] = slot as u32;
         out[1] = e;
         out[2] = c.state as u32;
+        out[49] = canon(sv.time as f32);
         if !c.spawned {
             return;
         }
@@ -175,6 +176,7 @@ impl World {
         out[46] = canon(f(fld::TELEPORT_TIME));
         out[47] = sv.matchstate.phase as i32 as u32;
         out[48] = canon(sv.matchstate.endtime);
+        out[49] = canon(sv.time as f32);
     }
 
     /// u32 count (= maxclients), then count × ClientRow

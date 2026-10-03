@@ -139,6 +139,9 @@ mod imp {
         pub fn serialize(&self, out: &mut Vec<u8>) {
             self.bots.serialize(out);
         }
+        pub fn hash(&self) -> u64 {
+            self.bots.hash()
+        }
         pub fn deserialize(b: &[u8]) -> Result<(BotSys, usize), String> {
             let (bots, used) = Bots::deserialize(b)?;
             Ok((BotSys { bots, nav: None }, used))
@@ -347,6 +350,11 @@ mod imp {
             }
         }
         pub fn new_map(&mut self, _maxclients: usize) {}
+        pub fn hash(&self) -> u64 {
+            let mut b = Vec::new();
+            self.serialize(&mut b);
+            b.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, &x| (h ^ x as u64).wrapping_mul(0x0100_0000_01b3))
+        }
         pub fn serialize(&self, out: &mut Vec<u8>) {
             out.extend_from_slice(&(self.states.len() as u32).to_le_bytes());
             for s in &self.states {

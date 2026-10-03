@@ -11,7 +11,7 @@ crate-type = ["cdylib", "rlib"]
 path = "src/lib.rs"
 
 [features]
-default = ["vm"]
+default = ["vm", "bots"]
 vm = ["dep:qcvm"]
 bots = ["vm", "dep:qtbots"]
 

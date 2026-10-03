@@ -19,7 +19,7 @@ import { DL_COLORS, DL_LIGHT_COLORS, Dlights, MAX_BEAMS, MAX_DLIGHT_SLOTS, MAX_E
 import { MF_GIB, MF_GRENADE, MF_ROCKET, MF_ROTATE, MF_TRACER, MF_TRACER2, MF_TRACER3, MF_ZOMGIB, loadMdl, loadSpr, mdlPose, mdlSkinImage, type Spr } from './mdl';
 import { Palette } from './palette';
 import { PostFX, type PostOptions } from './post';
-import { GLOW_FS, MAX_DLIGHTS, PARTICLE_FS, PARTICLE_VS, SPRITE_FS, SPRITE_VS } from './shaders';
+import { GLOW_FS, GLOW_VS, MAX_DLIGHTS, PARTICLE_FS, PARTICLE_VS, SPRITE_FS, SPRITE_VS } from './shaders';
 import { applyFilter, rgbaTexture } from './textures';
 import {
   CONTENTS_LAVA, CONTENTS_SLIME, CONTENTS_WATER, EF_BLUE, EF_BRIGHTLIGHT, EF_DIMLIGHT, EF_RED, EV_MUZZLEFLASH, EV_TEMP_ENTITY,
@@ -224,13 +224,21 @@ export class Renderer {
     this.scene.add(this.partMesh);
     // flashblend glows
     const glowMat = new THREE.RawShaderMaterial({
-      vertexShader: SPRITE_VS, fragmentShader: GLOW_FS, glslVersion: THREE.GLSL3, transparent: true, depthWrite: false,
-      uniforms: { uRight: { value: new THREE.Vector3() }, uUp: { value: new THREE.Vector3() } },
+      vertexShader: GLOW_VS, fragmentShader: GLOW_FS, glslVersion: THREE.GLSL3, transparent: true, depthWrite: false,
+      uniforms: { uRight: { value: new THREE.Vector3() }, uUp: { value: new THREE.Vector3() }, uFwd: { value: new THREE.Vector3() } },
     });
     glowMat.blending = THREE.CustomBlending;
     glowMat.blendSrc = THREE.OneFactor; glowMat.blendDst = THREE.OneFactor;
     glowMat.blendSrcAlpha = THREE.ZeroFactor; glowMat.blendDstAlpha = THREE.OneFactor;
     this.glow = new SpriteBatch(MAX_GLOWS, glowMat);
+    {
+      // a 16-segment fan: centre (0,0,1), ring (cos, sin, 0)
+      const pos: number[] = [0, 0, 1], idx: number[] = [];
+      for (let i = 0; i <= 16; i++) { const a = (i / 16) * Math.PI * 2; pos.push(Math.cos(a), Math.sin(a), 0); }
+      for (let i = 1; i <= 16; i++) idx.push(0, i, i + 1);
+      this.glow.geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      this.glow.geo.setIndex(idx);
+    }
     this.glow.mesh.renderOrder = 20;
     this.scene.add(this.glow.mesh);
     this.spriteMat = new THREE.RawShaderMaterial({
@@ -966,6 +974,7 @@ export class Renderer {
     const gu = (this.glow.mesh.material as THREE.RawShaderMaterial).uniforms;
     (gu.uRight.value as THREE.Vector3).set(this.right[0], this.right[1], this.right[2]);
     (gu.uUp.value as THREE.Vector3).set(this.up[0], this.up[1], this.up[2]);
+    (gu.uFwd.value as THREE.Vector3).set(this.fwd[0], this.fwd[1], this.fwd[2]);
     const modern = S.modelLighting === 'modern' || S.bloom;
     let n = 0;
     if (S.dynamicLights || S.flashblend) {
@@ -979,9 +988,8 @@ export class Renderer {
           if (d < rad) continue; // inside: V_AddLightBlend handled in addGlowBlend
           const c = DL_COLORS[D.type[i]];
           const k = modern ? 3 : 1.6;
-          const vx = (D.origin[i * 3] - cx) / d, vy = (D.origin[i * 3 + 1] - cy) / d, vz = (D.origin[i * 3 + 2] - cz) / d;
-          this.glow.push(D.origin[i * 3] - vx * rad, D.origin[i * 3 + 1] - vy * rad, D.origin[i * 3 + 2] - vz * rad,
-            -rad, rad, rad * 2, rad * 2, 0, 0, 1, 1, c[0] * k, c[1] * k, c[2] * k, 1);
+          this.glow.push(D.origin[i * 3], D.origin[i * 3 + 1], D.origin[i * 3 + 2], 0, 0, 0, 0, 0, 0, 1, 1, c[0] * k, c[1] * k, c[2] * k, 1);
+          this.glow.pos[(this.glow.count - 1) * 4 + 3] = rad;
         }
       }
       if (S.dynamicLights && !S.flashblend) {

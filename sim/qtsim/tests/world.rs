@@ -98,3 +98,52 @@ fn all_lqdm_maps_run_with_bots() {
         assert!(sounds > 100 && ents[0] > 10);
     }
 }
+
+#[test]
+fn membership_flow() {
+    let p = progs();
+    let m = Map::load("lqdm2", &std::fs::read(format!("{LQ_MAPS}/lqdm2.bsp")).unwrap()).unwrap();
+    let mut w = World::new(p, vec![Arc::new(m)], 0, 3, b"\\deathmatch\\3\\maxclients\\4\\bots\\1").unwrap();
+    let mut rows = Vec::new();
+    w.view_clients(&mut rows);
+    assert_eq!(rows[0], 4);
+    assert!((0..4).all(|s| rows[1 + s * 32 + 1] == 2), "all slots are bots");
+    assert_eq!(w.free_slot(), 0);
+    w.client_join(0, b"\\name\\alice\\team\\red\\*bot\\1");
+    w.client_join(0, b"\\name\\alice"); // idempotent
+    assert_eq!(w.sv.clients[0].state, 1);
+    assert_eq!(w.sv.clients[0].userinfo.get(b"*bot"), b"", "clients cannot set * keys");
+    for t in 1..=1500 {
+        script_tick(&mut w, t + 10_000);
+    }
+    let e = 1;
+    w.vm.set_e_f(e, qtsim::qcvm::defs::fld::FRAGS, 7.0);
+    w.sv.clients[0].stats[0] = 5;
+    // connection lost: a bot drives the same body, frags kept
+    w.client_idle(0);
+    assert_eq!(w.sv.clients[0].state, 3);
+    for _ in 0..200 {
+        w.tick();
+    }
+    assert!(w.sv.clients[0].spawned);
+    // back: same body, frags and stats kept
+    w.client_join(0, b"\\name\\alice");
+    assert_eq!(w.sv.clients[0].state, 1);
+    w.view_clients(&mut rows);
+    assert!(rows[1 + 3] as i32 >= 7 - 3, "frags kept across idle: {}", rows[1 + 3] as i32);
+    assert_eq!(w.sv.clients[0].stats[0], 5);
+    // leave: a bot takes the slot
+    w.client_leave(0);
+    assert_eq!(w.sv.clients[0].state, 2);
+    w.client_leave(0); // idempotent
+    assert_eq!(w.sv.clients[0].state, 2);
+    // a client command's prints are delivered with the next tick
+    w.client_join(1, b"\\name\\bob");
+    w.tick();
+    w.client_command(1, b"kill");
+    w.tick();
+    assert!(w.sv.sink.events.iter().any(|e| e.kind() == EV_PRINT), "kill message in the next tick's events");
+    let mut v = Vec::new();
+    w.view_client(1, &mut v);
+    assert!(f32::from_bits(v[49]) > 1.0, "ClientView 49 = sim time");
+}
