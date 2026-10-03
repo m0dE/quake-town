@@ -505,6 +505,22 @@ impl Bot {
                 out.target = Some(tgt);
                 return out;
             }
+            // A flag base is a fixed goal with a precomputed distance field: follow it rather
+            // than A*, whose per-search budget gives out on a big map's base-to-base run.
+            if self.chase && !self.forced {
+                if let Some(gi) = nav.goals.iter().position(|g| matches!(g.kind, GoalKind::Flag(_)) && dist(g.pos, tgt) < 64.0) {
+                    if self.cur != nav.goals[gi].node {
+                        if let Some(l) = nav.goal_next(gi, self.cur) {
+                            let l = *l;
+                            self.path.clear();
+                            return self.follow_link(nav, me, &l, out);
+                        }
+                    } else {
+                        out.target = Some(tgt);
+                        return out;
+                    }
+                }
+            }
             if self.path.is_empty() {
                 let Some(gn) = nav.nearest(tgt, 160.0) else { return out };
                 if gn == self.cur {
@@ -1004,7 +1020,8 @@ impl Bot {
                 if (self.goal != NONE || self.chase) && dist(t, me.origin) > 8.0 {
                     let dt = sub(t, me.origin);
                     // a flag carrier runs home and only shoots on the way
-                    let k = if me.items & (it::KEY1 | it::KEY2) != 0 { 3.0 } else { 0.8 };
+                    // and a runner on a CTF objective pushes through the fight
+                    let k = if me.items & (it::KEY1 | it::KEY2) != 0 { 3.0 } else if self.chase { 2.0 } else { 0.8 };
                     v = add(v, scale(norm([dt[0], dt[1], 0.0]), k));
                 }
             }
