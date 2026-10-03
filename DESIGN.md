@@ -166,8 +166,8 @@ trace, `PM_AirAccelerate` capping wishspd at 30. **Regression tests** (in
 `sim/qtsim/tests/pmove.rs`, against a flat test BSP built in code or a tiny compiled
 BSP): ground max speed 320; bunny hopping with optimal strafe gains speed every hop
 (record the speed after 10 hops with the optimal-angle bot input and pin it); strafe
-jump crosses a gap a straight jump cannot; jump apex height 45 units (QW: 270 up,
-gravity 800 → 45.56); rocket jump height (RL self-damage knockback, velocity +=
+jump crosses a gap a straight jump cannot; jump apex 43.81 units at msec 13 (QW integrates per frame; 45.56 is
+the continuous limit); rocket jump height (RL self-damage knockback, velocity +=
 dir × damage × 8 for self-damage in QW combat.qc → pin the height); circle jump
 start speed gain. Pin numbers measured from the port; where public numbers exist
 (e.g. 320 ground, 45.5 apex) assert them.
@@ -534,6 +534,26 @@ nearest, `r_dynamic 0`, fov / viewsize / crosshair. Performance: PVS culling per
 leaf, faces batched per texture × lightmap atlas page (one draw per texture), models
 instanced, target 60+ fps on an average laptop and smooth at 144 Hz (no allocation
 per frame).
+
+## Accepted amendments (part of the contract)
+
+- `docs/proposals/engine.md` §1–§5: `world_stopped`, `world_ambients`, static entities in
+  `world_view_ents` (`num = 0x10000 + i`), name lists start with the empty name, events
+  produced between ticks arrive with the next tick, ClientView word 49 = sim time,
+  punchangle words are 0 (kicks are event 7), event 2/10 word use, serverinfo keys the
+  engine reads (`maxclients` default 8, `bots` absent = off, `botskill` 1..5), the
+  deliberate QW deviations, and the fixangle rule for the shell. An idle member who
+  rejoins (state 3) keeps body, frags and stats.
+- pmove numbers pinned in `sim/qtsim/tests/pmove.rs`: ground 320, apex 43.81, bunny hop
+  320 → 712.3 over 10 optimal hops, circle-jump takeoff 456.1, strafe jump crosses a
+  254.9-unit gap a straight jump cannot, rocket jump 261.7 units.
+- `mod/qtdm/README.md` lists every serverinfo key the mod reads; the shell always sends
+  `timelimit` and `fraglimit`. qt_pickup weapon ids are 20 + weapon impulse.
+- `public/packs/index.json` entries also carry `file` and `title`; `players` is
+  `[min, max]` (`docs/proposals/content.md`).
+- Tick-rate measurement so far (game part, box at load 15–31): the dev node delivered
+  72.1 Hz of 77 (interval p50 13.3 ms, p99 25.9 ms, no gaps). To be re-measured on a quiet
+  box.
 
 ## Process
 

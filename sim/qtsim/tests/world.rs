@@ -74,6 +74,7 @@ const PINNED_RJ: f32 = 261.685;
 #[test]
 fn all_lqdm_maps_run_with_bots() {
     let p = progs();
+    let (mut total_pushers, mut total_moved) = (0, 0);
     for i in 1..=13 {
         let name = format!("lqdm{i}");
         let m = Map::load(&name, &std::fs::read(format!("{LQ_MAPS}/{name}.bsp")).unwrap()).unwrap();
@@ -81,6 +82,12 @@ fn all_lqdm_maps_run_with_bots() {
         let mut kills = 0;
         let mut sounds = 0;
         let mut ents = Vec::new();
+        use qtsim::qcvm::defs::fld;
+        let pushers: Vec<(u32, [f32; 3])> = (1..w.vm.num_edicts())
+            .filter(|&e| !w.vm.is_free(e) && w.vm.e_f(e, fld::MOVETYPE) as i32 == 7)
+            .map(|e| (e, w.vm.e_v(e, fld::ORIGIN)))
+            .collect();
+        let mut moved = vec![false; pushers.len()];
         for t in 1..=3000 {
             script_tick(&mut w, t);
             for e in &w.sv.sink.events {
@@ -91,12 +98,22 @@ fn all_lqdm_maps_run_with_bots() {
                 }
             }
             assert!(w.sv.error.is_none(), "{name} stopped at {t}: {:?}", w.sv.error);
+            for (k, (e, o)) in pushers.iter().enumerate() {
+                if w.vm.e_v(*e, fld::ORIGIN) != *o {
+                    moved[k] = true;
+                }
+            }
         }
+        let nmoved = moved.iter().filter(|&&m| m).count();
+        total_pushers += pushers.len();
+        total_moved += nmoved;
         w.view_ents(&mut ents);
         let statics = w.sv.statics.len();
-        println!("{name}: edicts {} ents {} statics {} sounds {} bprints {}", w.vm.num_edicts(), ents[0], statics, sounds, kills);
+        println!("{name}: edicts {} ents {} statics {} sounds {} bprints {} pushers {}/{} moved", w.vm.num_edicts(), ents[0], statics, sounds, kills, nmoved, pushers.len());
         assert!(sounds > 100 && ents[0] > 10);
     }
+    println!("pushers that moved: {total_moved}/{total_pushers}");
+    assert!(total_moved >= 10, "doors / plats / buttons must move (SV_PushMove)");
 }
 
 #[test]

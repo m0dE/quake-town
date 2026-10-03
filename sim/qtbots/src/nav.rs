@@ -46,6 +46,10 @@ pub struct Node {
 
 pub const NODE_WATER: u32 = 1;
 pub const NODE_EDGE: u32 = 2;
+/// Next to a fall with no floor (void) or into a death volume.
+pub const NODE_VOID: u32 = 4;
+/// Head under water (drowning risk on long stretches).
+pub const NODE_DEEP: u32 = 8;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Link {
@@ -123,6 +127,9 @@ struct Builder<'a, W: BotWorld> {
     links: Vec<Link>,
     linked: BTreeMap<(u32, u32), ()>,
     queue: VecDeque<u32>,
+    /// trigger_hurt boxes (grown): no node inside, falls into them are void
+    hurts: Vec<(Vec3, Vec3)>,
+    void_hit: bool,
 }
 
 fn kind_cost(kind: LinkKind, d: f32) -> f32 {
@@ -152,7 +159,8 @@ impl<'a, W: BotWorld> Builder<'a, W> {
     fn bad_contents(&self, p: Vec3) -> (bool, bool) {
         let feet = self.w.point_contents([p[0], p[1], p[2] - 23.0]);
         let waist = self.w.point_contents([p[0], p[1], p[2] + 4.0]);
-        let bad = feet == contents::LAVA || feet == contents::SLIME || feet == contents::SKY;
+        let hurt = self.hurts.iter().any(|(mn, mx)| (0..3).all(|k| p[k] + PLAYER_MAXS[k] > mn[k] && p[k] + PLAYER_MINS[k] < mx[k]));
+        let bad = hurt || feet == contents::LAVA || feet == contents::SLIME || feet == contents::SKY;
         let water = waist <= contents::WATER && waist >= contents::LAVA;
         (bad, water)
     }
@@ -188,8 +196,10 @@ impl<'a, W: BotWorld> Builder<'a, W> {
             return None;
         }
         let n = self.nodes.len() as u32;
+        let head = self.w.point_contents([p[0], p[1], p[2] + 22.0]);
+        let deep = head <= contents::WATER && head >= contents::LAVA;
         self.nodes.push(p);
-        self.flags.push(if water { NODE_WATER } else { 0 });
+        self.flags.push(if water { NODE_WATER } else { 0 } | if deep { NODE_DEEP } else { 0 });
         self.columns.entry(c).or_default().push(n);
         self.queue.push_back(n);
         Some(n)
@@ -266,10 +276,18 @@ impl<'a, W: BotWorld> Builder<'a, W> {
             // edge: fall
             let fall = self.tr(dn.endpos, [fe[0], fe[1], fe[2] - DROP_MAX]);
             if fall.fraction >= 1.0 || fall.normal[2] < 0.7 || fall.startsolid {
+                if fall.fraction >= 1.0 {
+                    self.void_hit = true;
+                }
                 return Step::Fail;
             }
-            // land in the target column
+            // land in the target column (not into a death volume)
             let lz = fall.endpos[2];
+            let (bad, _) = self.bad_contents(fall.endpos);
+            if bad {
+                self.void_hit = true;
+                return Step::Fail;
+            }
             return match self.floor(tx, ty, lz + STEP, STEP + 48.0) {
                 Some(l) => Step::Drop([tx, ty, l[2]]),
                 None => Step::Fail,
@@ -457,6 +475,7 @@ impl<'a, W: BotWorld> Builder<'a, W> {
     }
 
     fn expand(&mut self, n: u32) {
+        self.void_hit = false;
         let p = self.nodes[n as usize];
         let (cx, cy) = Self::col(p[0], p[1]);
         let mut edge = false;
@@ -511,6 +530,10 @@ impl<'a, W: BotWorld> Builder<'a, W> {
         if edge {
             self.flags[n as usize] |= NODE_EDGE;
         }
+        if self.void_hit {
+            self.flags[n as usize] |= NODE_VOID;
+            self.void_hit = false;
+        }
     }
 }
 
@@ -560,6 +583,7 @@ impl NavGraph {
         let mut dests: Vec<(Vec<u8>, Vec3)> = Vec::new();
         let mut plats: Vec<(Vec3, Vec3)> = Vec::new();
         let mut pushes: Vec<(Vec3, Vec3, Vec3)> = Vec::new(); // absmin, absmax, push velocity
+        let mut hurts: Vec<(Vec3, Vec3)> = Vec::new();
         let mut seeds: Vec<Vec3> = Vec::new();
         for e in 1..w.num_edicts() {
             let Some(ent) = w.entity(e) else { continue };
@@ -573,6 +597,8 @@ impl NavGraph {
                 teleports.push((ent.absmin, ent.absmax, ent.target.to_vec()));
             } else if ent.classname == b"func_plat" {
                 plats.push((ent.absmin, ent.absmax));
+            } else if ent.classname == b"trigger_hurt" {
+                hurts.push((sub(ent.absmin, [8.0; 3]), add(ent.absmax, [8.0; 3])));
             } else if ent.classname == b"trigger_push" {
                 let sp = if ent.speed > 0.0 { ent.speed } else { 1000.0 };
                 let v = scale(ent.movedir, sp * 10.0);
@@ -592,6 +618,8 @@ impl NavGraph {
             links: Vec::new(),
             linked: BTreeMap::new(),
             queue: VecDeque::new(),
+            hurts,
+            void_hit: false,
         };
         for s in &seeds {
             b.seed(*s);
@@ -728,6 +756,16 @@ impl NavGraph {
             })
             .collect();
         for l in b.links.iter_mut() {
+            let tf = b.flags[l.to as usize];
+            if tf & NODE_DEEP != 0 {
+                l.cost = l.cost * 3.0 + 60.0;
+            }
+            if tf & NODE_VOID != 0 && l.kind == LinkKind::Walk {
+                l.cost += 24.0;
+            }
+            if l.kind == LinkKind::Jump && b.flags[l.from as usize] & NODE_VOID != 0 {
+                l.cost += 150.0;
+            }
             if risky[l.to as usize] && l.kind != LinkKind::Teleport && l.kind != LinkKind::Push && l.kind != LinkKind::Plat {
                 l.cost += 300.0;
             }
