@@ -39,6 +39,7 @@ const ZIP = path.join(OUT, `${SLUG}.zip`);
 const MAX_FILES = 5000;
 const MAX_BYTES = 100 * 1024 * 1024;
 const DEFAULT_APP_ID = 'quake-town';
+let CRC = null; // crc32()'s table, built on first use
 const REPO_URL = 'https://github.com/m0dE/quake-town';
 
 const kb = (n) => `${Math.round(n / 1024).toLocaleString('en-US')} KB`;
@@ -193,7 +194,6 @@ function crcTable() {
   for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; }
   return t;
 }
-let CRC = null;
 function crc32(buf) { CRC ??= crcTable(); let c = 0xffffffff; for (let i = 0; i < buf.length; i++) c = CRC[(c ^ buf[i]) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; }
 
 /** A deterministic zip: entries in the order given, 1980-01-01 timestamps, no unix modes, no zip64. */
