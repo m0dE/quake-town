@@ -37,6 +37,20 @@ import { infoGet } from './sim/wire.js';
 declare const __BUILD_REV__: string;
 
 const params = new URLSearchParams(location.search);
+
+// Quake Town has no service worker. One left on this origin by another app that ran on the
+// same host:port answers our pack downloads with its cached page: remove it and reload once.
+if ('serviceWorker' in navigator) {
+  void navigator.serviceWorker.getRegistrations().then(async (regs) => {
+    if (!regs.length && !navigator.serviceWorker.controller) return;
+    console.warn(`[boot] removing ${regs.length} service worker(s) left on this origin by another app:`, regs.map((r) => r.active?.scriptURL ?? r.scope));
+    await Promise.all(regs.map((r) => r.unregister()));
+    if (navigator.serviceWorker.controller && !sessionStorage.getItem('qt-sw-reload')) {
+      sessionStorage.setItem('qt-sw-reload', '1');
+      location.reload();
+    }
+  }).catch(() => undefined);
+}
 const central = params.get('central') ?? undefined;
 const APP_ID = params.get('app') ?? LISTED_APP_ID;
 const API_KEY = params.get('app') ? undefined : LISTED_API_KEY;

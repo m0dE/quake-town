@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite';
 import { execSync } from 'node:child_process';
+import { appendFileSync } from 'node:fs';
 
 let rev = 'dev';
 try { rev = execSync('git rev-parse --short HEAD').toString().trim(); } catch { /* not a checkout */ }
@@ -11,6 +12,9 @@ try { rev = execSync('git rev-parse --short HEAD').toString().trim(); } catch { 
  */
 function binaryPacks() {
   const mw = (req, res, next) => {
+    if (/\.(pk3|pak|json)(\?|$)/i.test(req.url ?? '')) {
+      res.on('finish', () => appendFileSync('.cache/requests.log', `${new Date().toISOString()} ${req.method} ${req.url} host=${req.headers.host} from=${req.socket.remoteAddress} -> ${res.statusCode} ${res.getHeader('content-type') ?? ''}\n`));
+    }
     if (/\.(pk3|pak)(\?|$)/i.test(req.url ?? '')) {
       res.setHeader('Content-Type', 'application/octet-stream');
       res.setHeader('Cache-Control', 'no-transform, max-age=0, must-revalidate');
