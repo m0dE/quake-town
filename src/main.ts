@@ -33,6 +33,7 @@ import type { Game } from './game/game.js';
 import type { RendererLike } from './game/topdown.js';
 import { decodeDemo, loadDemo, listDemos, type DemoFile } from './demo/demo.js';
 import { infoGet } from './sim/wire.js';
+import { indieError, indieProgress, startIndie } from './indie.js';
 
 declare const __BUILD_REV__: string;
 
@@ -65,6 +66,7 @@ const loadingText = document.getElementById('loading-text')!;
 // ------------------------------------------------------------------ console + settings
 
 settings.start();
+startIndie(params);
 const cvars = useCvars();
 const cmds = new CommandSystem(cvars, binds, configs, () => settings.exportText());
 const con = new Console(cmds, cvars);
@@ -265,9 +267,11 @@ async function play(req: PlayRequest, demo?: DemoFile): Promise<void> {
     loading.classList.add('hidden');
     document.title = demo ? 'Demo — Quake Town' : req.offline ? 'Practice — Quake Town' : `${req.config.name || 'Room'} — Quake Town`;
     game.onLeave = (reason) => leave(reason);
+    if (!demo) { indieProgress('game_start'); if (!req.offline) indieProgress('online_match'); }
     if (params.get('probe') === '1') void installProbe(game);
   } catch (err) {
     console.error('[play] could not start', err);
+    indieError(err, { where: 'play', offline: !!req.offline, demo: !!demo });
     loading.classList.add('hidden');
     const msg = `Could not start: ${err instanceof Error ? err.message : String(err)}`;
     showFatal(msg);
