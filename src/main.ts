@@ -313,7 +313,6 @@ async function showMenu(notice = ''): Promise<void> {
       central, ...(notice ? { notice } : {}),
       packIndex: () => loader.index() as never,
       cacheLocalPack: (file) => content.cacheLocalPack(file),
-      idPaks: content.idPaks,
       ...(previewModule ? {
         renderPreview: (canvas: HTMLCanvasElement, look: { model: string; skin: string; topcolor: number; bottomcolor: number }, t: number) => previewModule!.renderCharacterPreview(canvas, content.vfs, {
           model: `progs/${look.model || 'player'}.mdl`, skin: Number.parseInt(look.skin, 10) || 0, top: look.topcolor, bottom: look.bottomcolor,

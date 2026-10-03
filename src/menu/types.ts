@@ -16,21 +16,14 @@ export interface PlayRequest {
   password?: string;
 }
 
-export interface IdPakLoader {
-  status(): Promise<{ loaded: boolean; files: { name: string; bytes: number }[] }>;
-  load(files: File[]): Promise<{ ok: boolean; message: string }>;
-  forget(): Promise<void>;
-}
-
 export interface MenuDeps {
   central?: string;
   /** One line shown at the top (e.g. why the player is back in the menu). */
   notice?: string;
   packIndex?: () => Promise<PackIndexEntry[]>;
   renderPreview?: (canvas: HTMLCanvasElement, look: PlayerLook, t: number) => void;
-  idPaks?: IdPakLoader;
   cacheLocalPack?: (file: File) => Promise<{ id: string; name: string; bytes: number }>;
-  /** Models and skins to offer on the Player screen (default: player / base). */
+  /** Models and skins to offer on the Customize screen (default: player / base). */
   models?: () => string[];
   skins?: () => string[];
 }
@@ -55,4 +48,4 @@ export interface MenuCtx {
   go(screen: ScreenId): void;
 }
 
-export type ScreenId = 'servers' | 'host' | 'player' | 'settings' | 'paks';
+export type ScreenId = 'servers' | 'host' | 'player' | 'settings';

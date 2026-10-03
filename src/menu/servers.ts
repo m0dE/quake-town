@@ -1,7 +1,7 @@
 /**
  * The server browser: every Quake Town room central knows, the standing servers, and
- * your favourites; filters, sort by any column, refresh, double-click (or Enter) to join,
- * join by room code or link.
+ * your favourites; filters, sort by any column, refresh. Selecting a server shows its Join
+ * button at the end of its row (double-click or Enter joins too); join by room code or link.
  *
  * Licence: GPL-2.0-or-later.
  */
@@ -104,6 +104,7 @@ export function serversScreen(ctx: MenuCtx): Screen {
       });
       return h(`span.${c.cls}`, { role: 'columnheader' }, b);
     }),
+    h('span.c-act', { role: 'columnheader' }, h('span.sr', {}, 'Join')),
   );
   const body = h('div.sbody', { role: 'rowgroup' });
   const table = h('div.stable', { role: 'table', 'aria-label': 'Servers' }, head, body);
@@ -113,6 +114,7 @@ export function serversScreen(ctx: MenuCtx): Screen {
     const t = e.target as Element;
     const row = t.closest<HTMLElement>('[data-room]');
     if (!row) return;
+    if (t.closest('.rowjoin')) { joinRow(row.dataset.room!); return; }
     if (t.closest('.fav')) {
       const on = toggleFavourite(row.dataset.room!);
       ctx.toast(on ? 'Added to favourites.' : 'Removed from favourites.');
@@ -124,12 +126,12 @@ export function serversScreen(ctx: MenuCtx): Screen {
   });
   body.addEventListener('dblclick', (e) => {
     const row = (e.target as Element).closest<HTMLElement>('[data-room]');
-    if (row && !(e.target as Element).closest('.fav')) joinRow(row.dataset.room!);
+    if (row && !(e.target as Element).closest('.fav, .rowjoin')) joinRow(row.dataset.room!);
   });
   body.addEventListener('keydown', (e) => {
     const row = (e.target as Element).closest<HTMLElement>('[data-room]');
     if (!row) return;
-    if (e.key === 'Enter') { e.preventDefault(); joinRow(row.dataset.room!); }
+    if (e.key === 'Enter' && !(e.target as Element).closest('.rowjoin')) { e.preventDefault(); joinRow(row.dataset.room!); }
     else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
       const sib = (e.key === 'ArrowDown' ? row.nextElementSibling : row.previousElementSibling) as HTMLElement | null;
@@ -295,6 +297,7 @@ export function serversScreen(ctx: MenuCtx): Screen {
           title: !p ? 'Not measured' : p.kind === 'known' ? 'Measured when you last played on this server’s machine' : p.kind === 'region' ? 'Round trip to this region’s server machine' : 'Round trip to the network. This room’s machine is not known until you join.',
         }, pingText(p)),
         h('span.c-mod', { role: 'cell' }, modName(r)),
+        h('span.c-act', { role: 'cell' }, r.roomId === selected ? h('button.cta.rowjoin', { type: 'button', 'aria-label': `Join ${c.name}` }, 'Join') : null),
       );
       body.append(row);
     }
@@ -310,7 +313,7 @@ export function serversScreen(ctx: MenuCtx): Screen {
     clear(detail);
     const r = list.find((x) => x.roomId === selected);
     if (!r) {
-      detail.append(h('p.hint', {}, matchMedia('(pointer: coarse)').matches ? 'Tap a server to see its maps, then join.' : 'Double-click a server to join. Select one to see its maps and share it.'));
+      detail.append(h('p.hint', {}, matchMedia('(pointer: coarse)').matches ? 'Tap a server, then Join.' : 'Select a server, then Join. Double-click joins straight away.'));
       return;
     }
     const c = r.config;
@@ -320,8 +323,6 @@ export function serversScreen(ctx: MenuCtx): Screen {
     copy.addEventListener('click', async () => {
       try { await navigator.clipboard.writeText(roomLink(r.roomId)); ctx.toast('Link copied. Anyone with it joins this server.'); } catch { ctx.toast(roomLink(r.roomId)); }
     });
-    const join = h('button.cta', { type: 'button' }, 'Join game');
-    join.addEventListener('click', () => joinRow(r.roomId));
     const spec = h('button.ghost', { type: 'button' }, 'Spectate');
     spec.addEventListener('click', () => joinRow(r.roomId, true));
     detail.append(
@@ -330,7 +331,7 @@ export function serversScreen(ctx: MenuCtx): Screen {
         h('p.d-sub', {}, `${m.label}. ${c.timelimit ? `${c.timelimit} minutes` : 'No time limit'}, ${c.fraglimit ? `${m.limitLabel.toLowerCase()} ${c.fraglimit}` : `no ${m.limitLabel.toLowerCase()}`}. ${r.live ? `Open for ${formatAge(r.ageSeconds)}.` : 'Nobody is here yet: joining starts it.'}`),
         h('ol.rot', { 'aria-label': 'Map rotation' }, ...c.rotation.map((name) => h('li', {}, h('b', {}, t.get(name)?.title ?? name), h('small', {}, name)))),
       ),
-      h('div.d-act', {}, join, spec, copy),
+      h('div.d-act', {}, spec, copy),
     );
   }
 

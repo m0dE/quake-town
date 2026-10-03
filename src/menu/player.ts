@@ -1,5 +1,5 @@
 /**
- * Player: name, team, model, skin, shirt and pants colours (QW palette rows), crosshair
+ * Customize (the Player screen): name, team, model, skin, shirt and pants colours (QW palette rows), crosshair
  * designer, HUD layout — with the character preview.
  *
  * Licence: GPL-2.0-or-later.
@@ -9,41 +9,17 @@ import {
 } from '../settings/index.js';
 import { h, clear } from './dom.js';
 import { pixelText } from './pixelfont.js';
-import { drawPlaceholder } from './preview.js';
+import { characterView } from './preview.js';
 import type { MenuCtx, Screen } from './types.js';
 
 export function playerScreen(ctx: MenuCtx): Screen {
   const unsubs: (() => void)[] = [];
-  let raf = 0;
-  let turn = 0;
 
   // ------------------------------------------------------------------ preview
-  const canvas = h('canvas.preview', { width: '360', height: '480', 'aria-label': 'Your character' });
+  const view = characterView(ctx.deps);
   const plate = h('div.plate', {}, h('b.pname'), h('small.pteam'));
-  const previewBox = h('div.previewbox', {}, canvas, plate,
+  const previewBox = h('div.previewbox', {}, view.canvas, plate,
     h('p.fine', {}, ctx.deps.renderPreview ? 'Drag to turn.' : 'Drag to turn. The full 3D model shows once the game has loaded.'));
-  let dragX: number | null = null;
-  canvas.addEventListener('pointerdown', (e) => { dragX = e.clientX; canvas.setPointerCapture(e.pointerId); });
-  canvas.addEventListener('pointermove', (e) => { if (dragX !== null) { turn += (e.clientX - dragX) / 80; dragX = e.clientX; } });
-  canvas.addEventListener('pointerup', () => { dragX = null; });
-
-  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const t0 = performance.now();
-  const frame = (): void => {
-    const t = reduce ? 0.9 : (performance.now() - t0) / 1000;
-    const look = playerLook();
-    if (ctx.deps.renderPreview) {
-      // The renderer sizes its own WebGL canvas; `t + turn` turns the model.
-      ctx.deps.renderPreview(canvas, look, t + turn);
-    } else {
-      const dpr = Math.min(2, devicePixelRatio || 1);
-      const w = Math.round(canvas.clientWidth * dpr);
-      const hh = Math.round(canvas.clientHeight * dpr);
-      if (w && hh && (canvas.width !== w || canvas.height !== hh)) { canvas.width = w; canvas.height = hh; }
-      drawPlaceholder(canvas, look, t, turn);
-    }
-    raf = requestAnimationFrame(frame);
-  };
 
   // ------------------------------------------------------------------ identity
   const name = h('input', { type: 'text', maxlength: '20', 'aria-label': 'Name', autocomplete: 'nickname' });
@@ -160,7 +136,7 @@ export function playerScreen(ctx: MenuCtx): Screen {
   const field = (label: string, input: HTMLElement, hint?: string): HTMLElement => h('label.field', {}, h('span', {}, label), input, hint ? h('small', {}, hint) : null);
 
   const el = h('section.screen.player', { 'aria-labelledby': 'pl-title' },
-    h('div.screen-head', {}, h('h2#pl-title', {}, pixelText('Player', { px: 4, bold: true }))),
+    h('div.screen-head', {}, h('h2#pl-title', {}, pixelText('Customize', { px: 4, bold: true }))),
     h('div.player-grid', {},
       previewBox,
       h('div.col', {},
@@ -185,10 +161,9 @@ export function playerScreen(ctx: MenuCtx): Screen {
       paintPlate();
       paintCrosshair();
       paintHud();
-      cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(frame);
+      view.start();
     },
-    hide() { cancelAnimationFrame(raf); },
+    hide() { view.stop(); },
     dispose() { for (const u of unsubs) u(); },
   };
 }
