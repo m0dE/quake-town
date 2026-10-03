@@ -14,7 +14,7 @@ export const info = {
   modes: ['duel', '2on2', 'ffa', 'ca'], players: [2, 4],
 };
 
-const SKY = 'sky_pando';
+const SKY = 'sky5_blu'; // LibreQuake's open blue cloud sky
 const T = {
   top: 'aqf074', side: 'aqmetl14', trim: 'aqtrim01', under: 'aqpipe08',
   tower: 't_wall2a', towerTop: 'aqconc03', post: 'aqsupp02', metal: 'met_gry_flat',
@@ -26,8 +26,8 @@ export function build() {
     message: 'Aerodrome',
     wads: ['lq_tech.wad', 'lq_metal.wad', 'lq_liquidsky.wad', 'lq_utility.wad'],
     worldspawn: {
-      _sunlight: '260', _sun_mangle: '-35 -55 0', _sunlight_color: '1 0.8 0.6',
-      _sunlight2: '170', _sunlight2_color: '0.95 0.6 0.5', _minlight: '20', _bounce: '1', _dirt: '1',
+      _sunlight: '260', _sun_mangle: '-35 -55 0', _sunlight_color: '1 0.95 0.85',
+      _sunlight2: '190', _sunlight2_color: '0.6 0.7 1', _minlight: '20', _bounce: '1', _dirt: '1',
       sounds: '0',
     },
   });

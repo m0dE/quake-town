@@ -10,7 +10,7 @@ import { fetchAll, ROOT, PATHS, PINS } from './fetch.mjs';
 import { mkdirSync } from 'node:fs';
 import { buildBase } from './build-base.mjs';
 import { buildMapsLq, buildMapsQt } from './build-maps.mjs';
-import { PACKS_DIR } from './lib/packs.mjs';
+import { PACKS_DIR, writeAtomic, pruneStalePacks } from './lib/packs.mjs';
 import { sha256, zipEntries } from './lib/archive.mjs';
 
 /** the mod part's pack: mod/qtdm/build/pack.json if present, else scan public/packs/qtdm-*.pk3 */
@@ -84,7 +84,8 @@ export async function buildContent({ fast = false } = {}) {
   writeLicenses(index);
   const json = JSON.stringify(index, null, 1) + '\n';
   const out = join(PACKS_DIR, 'index.json');
-  if (!existsSync(out) || readFileSync(out, 'utf8') !== json) writeFileSync(out, json);
+  if (!existsSync(out) || readFileSync(out, 'utf8') !== json) writeAtomic(out, json);
+  pruneStalePacks(index.map((e) => e.file));
   const kb = (n) => `${(n / 1024).toFixed(0)} KB`;
   console.log(`build:content ${((Date.now() - t0) / 1000).toFixed(1)} s: ` + index.map((e) => `${e.file} ${kb(e.bytes)}`).join(', '));
   return index;

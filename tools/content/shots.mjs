@@ -2,7 +2,7 @@
 // Screenshots of our maps in the real renderer (src/render test page, headless Chromium).
 //   RENDER_PORT=5297 npx vite --config src/render/demo/vite.config.js &   (maps linked into .cache/render-test/maps)
 //   node tools/content/shots.mjs [maps=qt_aero,qt_tower,qt_fort] [preset=modern] [port=5297]
-// Cameras: content/maps/<map>.mjs `shots` export, else the map's spawns.
+// Cameras: content/maps/<map>.mjs `shots` export, else the map's spawns; cams=x,y,z,pitch,yaw;… overrides.
 // Copyright (C) 2026 Quake Town contributors. GPL-2.0-or-later.
 import { chromium } from '/app/data/home/arrr-mono/node_modules/playwright/index.mjs';
 import fs from 'node:fs';
@@ -35,20 +35,21 @@ try {
   await page.waitForFunction(() => document.title === 'ready', null, { timeout: 180000 });
   for (const map of maps) {
     await page.evaluate((m) => window.__qt.loadMap(m), map);
-    const bsp = parseBsp(fs.readFileSync(path.join('.cache/render-test/maps', `${map}.bsp`)));
+    const bsp = parseBsp(fs.readFileSync(path.join('.cache/maps', `${map}.bsp`)));
     const flags = bsp.ents.filter((e) => /^item_flag_team[12]$/.test(e.classname)).map((e) => {
       const o = e.origin.split(' ').map(Number);
       return { x: o[0], y: o[1], z: o[2] - 8, skin: e.classname.endsWith('1') ? 0 : 1 };
     });
-    if (flags.length) {
+    const hasAdd = await page.evaluate(() => typeof window.__qt.renderer?.vfs?.add === 'function');
+    if (flags.length && hasAdd) {
       await page.evaluate(([b64, fl]) => {
         const bin = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
         window.__qt.renderer.vfs.add('progs/flag.mdl', bin);
         for (const f of fl) window.__qt.things().push({ model: 'progs/flag.mdl', x: f.x, y: f.y, z: f.z, yaw: 90, frame: 2, skin: f.skin, effects: 0, kind: 'static' });
       }, [flagMdl(), flags]);
     }
-    let cams = [];
-    try { const mod = await import(path.resolve('content/maps', `${map}.mjs`)); cams = mod.shots ?? []; } catch { /* none */ }
+    let cams = arg.cams ? arg.cams.split(';').map((c) => c.split(',').map(Number)) : [];
+    if (!cams.length) try { const mod = await import(path.resolve('content/maps', `${map}.mjs`)); cams = mod.shots ?? []; } catch { /* none */ }
     if (!cams.length) cams = (await page.evaluate(() => window.__qt.spawns())).slice(0, 4).map((s) => [s.x, s.y, s.z + 22, 8, s.yaw]);
     for (let v = 0; v < cams.length; v++) {
       for (const preset of presets) {

@@ -3,6 +3,17 @@
 Status: **published**. Later changes are listed here first.
 
 Changes:
+- 2026-10-03 (match feedback: void falls, CTF, drowning): no API break. Bots state
+  bytes changed (new fields; bump sim_version). Behaviour: nodes inside trigger_hurt are
+  never created and falls into them are not links; `NODE_VOID` edges cost more and stop
+  bunny hops; every tick a point trace checks the floor ahead (and at a jump's landing)
+  so bots don't walk/strafe/dodge-jump off ledges; head-under-water nodes cost 3x and a
+  bot under water > 4 s swims up; CTF flags are live point goals (take enemy flag,
+  return own dropped flag, carrier runs home and only shoots on the way, everyone hunts
+  enemy carriers = players with IT_KEY1/2, 1 in 3 bots defends). Own flag = same `.team`
+  when the mod sets it on players and flags; otherwise learned (the flag I carry is the
+  enemy's, a flag at home I stand on without taking it is mine), falling back to the
+  flag nearest my spawn. `BotDebug` has more fields (tools only).
 - 2026-10-03: `trace` and `trace_world` take `&mut self` (the engine's SV_Move needs it);
   `NavGraph::build(&mut world)`. `ClientInfo.team` / `EntInfo.team` are the QC `.team`
   values (CTF: a flag whose `.team` equals the player's is his own flag).

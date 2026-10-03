@@ -268,11 +268,11 @@
   "title": "Quake Town base (LibreQuake)"
  },
  {
-  "id": "993ade88b4258334974898917df08aaba7346cd8e26f2b7b52579569e1641da9",
+  "id": "3d770a4e9c021fcb96c5cdbe7d105623cb0823407c4d43d5812fa1900626a0b5",
   "name": "maps-qt",
   "kind": "maps",
-  "file": "maps-qt-993ade88b425.pk3",
-  "bytes": 1473079,
+  "file": "maps-qt-3d770a4e9c02.pk3",
+  "bytes": 1478094,
   "files": [
    "licenses/readme.txt",
    "maps.json",
