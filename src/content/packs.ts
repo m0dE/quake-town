@@ -26,10 +26,10 @@ const HEX64 = /^[0-9a-f]{64}$/;
 const HEX12 = /^[0-9a-f]{12}$/;
 
 /** Download with progress, refusing more than `limit` bytes. */
-export async function fetchBytes(url: string, opts: { limit?: number; expected?: number; onProgress?: Progress; fetchImpl?: typeof fetch } = {}): Promise<Uint8Array> {
+export async function fetchBytes(url: string, opts: { limit?: number; expected?: number; onProgress?: Progress; fetchImpl?: typeof fetch; reload?: boolean } = {}): Promise<Uint8Array> {
   const limit = opts.limit ?? LIMITS.packBytes;
   const f = opts.fetchImpl ?? fetch;
-  const res = await f(url, { credentials: 'omit' });
+  const res = await f(url, opts.reload ? { credentials: 'omit', cache: 'reload' } : { credentials: 'omit' });
   if (!res.ok) throw new PackError(`download failed: HTTP ${res.status} for ${url}`);
   const len = Number(res.headers.get('content-length') || 0);
   // content-length is the encoded size when the server compresses; only trust it as an upper bound check
@@ -120,7 +120,17 @@ export class PackLoader {
     let lastErr: unknown = null;
     if (entry?.file) {
       try {
-        const bytes = await fetchBytes(this.baseUrl + entry.file, { expected: entry.bytes, onProgress, fetchImpl: this.fetchImpl, limit: Math.max(LIMITS.packBytes, entry.bytes) });
+        const get = (reload: boolean): Promise<Uint8Array> => fetchBytes(this.baseUrl + entry.file, { expected: entry.bytes, onProgress, fetchImpl: this.fetchImpl, limit: Math.max(LIMITS.packBytes, entry.bytes), reload });
+        let bytes = await get(false);
+        if ((await sha256Hex(bytes)) !== full) {
+          // a stale browser cache or a proxy that altered the bytes: once more, past every cache
+          console.warn(`[packs] ${entry.file}: got ${bytes.length} bytes (expected ${entry.bytes}) that do not match; downloading it again`);
+          bytes = await get(true);
+          if ((await sha256Hex(bytes)) !== full) {
+            const head = Array.from(bytes.subarray(0, 8), (b) => b.toString(16).padStart(2, '0')).join(' ');
+            console.error(`[packs] ${entry.file} still does not match: ${bytes.length} bytes, starts ${head}. Something between the server and this browser changes binary files.`);
+          }
+        }
         return await this.accept(full, entry.name, bytes, 'builtin');
       } catch (e) { lastErr = e; }
     }
