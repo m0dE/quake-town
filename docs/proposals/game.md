@@ -15,17 +15,14 @@ the account — proposal to the menu part. The settings default binds use
 
 ## 2. Engine (`sim/qtsim`)
 
-1. **`world_hash` costs as much as a tick** (measured in Node through the wrapper,
-   qt_aero: 0.6–0.8 ms per hash vs 0.6–1.1 ms per `world_tick`, 82–178 KB of state).
-   The lockstep hashes every hashed frame on every client; the shell now hashes every
-   4th frame (`HASH_EVERY` in `src/net/session.ts`, 19 verdicts/s at 77 Hz). A cheaper
-   hash (xxhash3/wyhash over the edict words, or an incremental hash) would let it go
-   back to every frame.
+1. ~~`world_hash` costs as much as a tick~~ — done: after the cheaper hash landed it
+   measures 51–81 µs (Node, qt_aero, 4–8 slots, was 0.6–0.8 ms), so `HASH_EVERY` in
+   `src/net/session.ts` is back to 1 (a verdict on every frame).
 2. **`world_tick` at 0.6 ms (4 slots, no bots) to 1.1 ms (16 slots with bots)** on this
    box under load. At 77 Hz with whole-world prediction a client steps the world about
    2–3 times per tick (confirmed + predicted + replays after a misprediction): budget is
    tight on a laptop. Profile `SV_Physics`/bots.
-3. **ClientView word 49 = sim time (f32)**. The shell needs the sim's `time` for the
+3. ~~ClientView word 49 = sim time~~ — landed and used for the match clock. Was: **ClientView word 49 = sim time (f32)**. The shell needs the sim's `time` for the
    match clock (`phaseEnd - time`). It derives it as `1 + (frame - mapStartFrame) × 0.013`
    with `mapStartFrame` from event 13, which is exact only while ticksPerFrame = 1 and
    the world was seen from its first changelevel. One word removes the guess.

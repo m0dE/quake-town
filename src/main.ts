@@ -13,6 +13,7 @@
  *   ?name=<name>              player name for this tab
  *   ?fake=1                   the TS stand-in sim instead of public/qtsim.wasm
  *   ?probe=1                  install the arrr harness probe (arena judge)
+ *   ?exec=<commands>          console text run at boot (tests: "r_preset classic")
  */
 import './main.css';
 import { lockstep } from 'arrr-network';
@@ -21,9 +22,8 @@ import { useCvars } from './console/cvars.js';
 import { CommandSystem } from './console/commands.js';
 import { Console } from './console/console.js';
 import { Gfx, Draw2D } from './hud/gfx.js';
-import { PackLoader } from './content/packs.js';
-import { PackVfs } from './content/vfs.js';
-import type { PackRef, PackRole, Vfs } from './content/types.js';
+import { createContent } from './content/index.js';
+import type { PackRef, Vfs } from './content/types.js';
 import { QtSim } from './sim/qtsim.js';
 import { createFakeSim } from './sim/fake.js';
 import { decodeRoomId, defaultConfig, encodeRoomId, toServerinfo, isMode, type RoomConfig } from './rooms/index.js';
@@ -54,10 +54,14 @@ const cmds = new CommandSystem(cvars, binds, configs, () => settings.exportText(
 const con = new Console(cmds, cvars);
 cmds.print(`Quake Town ${typeof __BUILD_REV__ === 'string' ? __BUILD_REV__ : 'dev'}\n`);
 if (params.get('name')) cvars.set('name', params.get('name')!);
+// ?exec=<console text>: settings for a test run ("r_preset classic; show_fps 1")
+if (params.get('exec')) cmds.exec(params.get('exec')!);
 
 // ------------------------------------------------------------------ prefetch
 
-const loader = new PackLoader();
+/** One content set for the page: base + the player's id paks (art only), then each room's packs. */
+const content = createContent();
+const loader = content.loader;
 const BUILTIN_ROOM_PACKS = ['maps-lq', 'maps-qt', 'qtdm'];
 /** Everything a match needs starts downloading now (the loader caches by sha256). */
 const prefetchPacks = (async () => {
@@ -73,20 +77,20 @@ gameModule.catch(() => { /* reported at play */ });
 
 /** The renderer, if this build has one (src/render/renderer.ts). */
 const rendererModules = import.meta.glob('./render/renderer.ts');
+const previewModules = import.meta.glob('./render/preview.ts');
 
 let gfx: Gfx | null = null;
-let basePromise: Promise<{ vfs: PackVfs; gfx: Gfx }> | null = null;
+let basePromise: Promise<{ vfs: Vfs; gfx: Gfx }> | null = null;
 /**
- * The base pack (HUD pics, fonts, sounds), mounted once. After the prefetch: two
- * concurrent downloads of one URL make Chromium fail one of them (ERR_CACHE_WRITE_FAILURE).
+ * The base pack (HUD pics, fonts, sounds) and the player's id paks, mounted once. After the
+ * prefetch: two concurrent downloads of one URL make Chromium fail one (ERR_CACHE_WRITE_FAILURE).
  */
-function base(): Promise<{ vfs: PackVfs; gfx: Gfx }> {
+function base(): Promise<{ vfs: Vfs; gfx: Gfx }> {
   basePromise ??= (async () => {
     await prefetchPacks;
-    const v = new PackVfs();
-    try { await loader.mountAll(v, [{ ref: { id: 'base' }, role: 'base' }]); } catch (err) { console.warn('[boot] no base pack:', err); }
-    gfx = new Gfx(v);
-    return { vfs: v, gfx };
+    try { await content.loadBase(); } catch (err) { console.warn('[boot] no base pack:', err); }
+    gfx = new Gfx(content.vfs);
+    return { vfs: content.vfs, gfx };
   })();
   return basePromise;
 }
@@ -151,16 +155,18 @@ async function makeRenderer(canvas: HTMLCanvasElement, vfs: Vfs): Promise<Render
 }
 
 /** Mount the room's packs and load progs + every map of the rotation into the (one) sim module. */
-async function prepare(config: RoomConfig, serverinfo: string): Promise<{ vfs: PackVfs; sim: QtSim; progsId: number; maps: Map<string, number>; packs: string[] }> {
+async function prepare(config: RoomConfig, serverinfo: string): Promise<{ vfs: Vfs; sim: QtSim; progsId: number; maps: Map<string, number>; packs: string[] }> {
   status('Loading packs');
-  await prefetchPacks;
-  const vfs = new PackVfs();
-  const refs: { ref: PackRef; role: PackRole }[] = [{ ref: { id: 'base' }, role: 'base' }];
-  if (!FAKE) for (const n of ['maps-lq', 'maps-qt']) refs.push({ ref: { id: n }, role: 'room' });
-  if (!FAKE) refs.push({ ref: config.mod ? { id: config.mod.id, ...(config.mod.url ? { url: config.mod.url } : {}) } : { id: 'qtdm' }, role: 'room' });
-  if (!FAKE) for (const p of config.packs) refs.push({ ref: { id: p.id, ...(p.url ? { url: p.url } : {}) }, role: 'room' });
-  const mounts = await loader.mountAll(vfs, refs, (d, t) => status(`Loading packs ${t ? Math.round((d / t) * 100) : 0}%`));
-  const packs = mounts.filter((m) => m.role !== 'idpak').map((m) => m.id);
+  await base();
+  const refs: PackRef[] = [];
+  if (!FAKE) {
+    for (const n of ['maps-lq', 'maps-qt']) refs.push({ id: n });
+    refs.push(config.mod ? { id: config.mod.id, ...(config.mod.url ? { url: config.mod.url } : {}) } : { id: 'qtdm' });
+    for (const p of config.packs) refs.push({ id: p.id, ...(p.url ? { url: p.url } : {}) });
+  }
+  await content.loadRoom(refs, (d, t) => status(`Loading packs ${t ? Math.round((d / t) * 100) : 0}%`));
+  const vfs = content.vfs;
+  const packs = vfs.mounts().filter((m) => m.role !== 'idpak').map((m) => m.id);
 
   status('Starting the simulation');
   if (!simCache.sim) {
@@ -244,15 +250,28 @@ function leave(reason = ''): void {
   void showMenu(reason);
 }
 
+let previewModule: { renderCharacterPreview: (c: HTMLCanvasElement, v: Vfs, look: { model?: string; skin: number; top: number; bottom: number }, t: number) => void } | null = null;
+
 async function showMenu(notice = ''): Promise<void> {
   menuRoot.classList.remove('hidden');
+  // the 3D player preview, drawn from the base pack (and the player's id paks)
+  if (!previewModule && !FAKE) {
+    try { await base(); const load = previewModules['./render/preview.ts']; if (load) previewModule = await load() as typeof previewModule; } catch (e) { console.warn('[menu] no 3D preview:', e); }
+  }
   document.title = 'Quake Town';
   try {
     const m = await import('./menu/index.js');
     const req = await m.showMenu(menuRoot, {
       central, ...(notice ? { notice } : {}),
       packIndex: () => loader.index() as never,
-      cacheLocalPack: (file) => loader.cacheLocalPack(file),
+      cacheLocalPack: (file) => content.cacheLocalPack(file),
+      idPaks: content.idPaks,
+      ...(previewModule ? {
+        renderPreview: (canvas: HTMLCanvasElement, look: { model: string; skin: string; topcolor: number; bottomcolor: number }, t: number) => previewModule!.renderCharacterPreview(canvas, content.vfs, {
+          model: `progs/${look.model || 'player'}.mdl`, skin: Number.parseInt(look.skin, 10) || 0, top: look.topcolor, bottom: look.bottomcolor,
+        }, t),
+      } : {}),
+      models: () => content.vfs.list('progs/').filter((p) => /^progs\/player\w*\.mdl$/.test(p)).map((p) => p.slice(6, -4)),
     });
     await play(req);
   } catch (err) {

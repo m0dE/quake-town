@@ -78,10 +78,10 @@ export const CV = {
   onground: 16, waterlevel: 17, watertype: 18, health: 19, armor: 20, armortype: 21, currentammo: 22,
   shells: 23, nails: 24, rockets: 25, cells: 26, items: 27, weapon: 28, weaponmodel: 29, weaponframe: 30,
   frags: 31, deadflag: 32, effects: 33, fixangle: 34, fixAngles: 35, dmgTake: 38, dmgSave: 39,
-  dmgFrom: 40, intermission: 43, spectator: 44, jumpHeld: 45, teleportTime: 46, phase: 47, phaseEnd: 48,
+  dmgFrom: 40, intermission: 43, spectator: 44, jumpHeld: 45, teleportTime: 46, phase: 47, phaseEnd: 48, time: 49,
 } as const;
 /** Words of ClientView that are f32 bit patterns. */
-export const CV_FLOATS: readonly number[] = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 35, 36, 37, 40, 41, 42, 46, 48];
+export const CV_FLOATS: readonly number[] = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 35, 36, 37, 40, 41, 42, 46, 48, 49];
 
 export const CLIENT_EMPTY = 0, CLIENT_HUMAN = 1, CLIENT_BOT = 2, CLIENT_IDLE = 3;
 

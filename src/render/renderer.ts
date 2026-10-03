@@ -22,19 +22,31 @@ import { PostFX, type PostOptions } from './post';
 import { GLOW_FS, GLOW_VS, MAX_DLIGHTS, PARTICLE_FS, PARTICLE_VS, SPRITE_FS, SPRITE_VS } from './shaders';
 import { applyFilter, rgbaTexture } from './textures';
 import {
-  CONTENTS_LAVA, CONTENTS_SLIME, CONTENTS_WATER, EF_BLUE, EF_BRIGHTLIGHT, EF_DIMLIGHT, EF_RED, EV_MUZZLEFLASH, EV_TEMP_ENTITY,
+  CONTENTS_LAVA, CONTENTS_SLIME, CONTENTS_WATER, EF_BLUE, EF_BRIGHTLIGHT, EF_DIMLIGHT, EF_FLAG1, EF_FLAG2, EF_RED, EV_MUZZLEFLASH, EV_TEMP_ENTITY,
   MODERN_SETTINGS, TE_BLOOD, TE_EXPLOSION, TE_GUNSHOT, TE_KNIGHTSPIKE, TE_LAVASPLASH, TE_LIGHTNING1, TE_LIGHTNING2, TE_LIGHTNING3,
   TE_LIGHTNINGBLOOD, TE_SPIKE, TE_SUPERSPIKE, TE_TAREXPLOSION, TE_TELEPORT, TE_WIZSPIKE,
   type RenderFrame, type RenderSettings, type RenderStats, type Vec3,
 } from './types';
 
 const MAX_EDICTS = 4096;
+/** static entities (makestatic) arrive with num = 0x10000 + i (DESIGN.md "Accepted amendments") */
+const STATIC_BASE = 0x10000;
+const MAX_STATICS = 4096;
+const STATE_SLOTS = MAX_EDICTS + MAX_STATICS;
+/** per-entity state slot: edicts 0..4095, statics 4096..8191, -1 = out of range */
+function stateSlot(num: number): number {
+  if (num >= 0 && num < MAX_EDICTS) return num;
+  if (num >= STATIC_BASE && num < STATIC_BASE + MAX_STATICS) return MAX_EDICTS + (num - STATIC_BASE);
+  return -1;
+}
 const MAX_PARTICLES = 4096;
 const MAX_GLOWS = 64;
 const MAX_SPRITES = 64;
 const DEG = Math.PI / 180;
 const PLANE_ORDER = [0, 1, 2, 3, 5]; // three.js frustum: right, left, bottom, top, (far), near
 const WHITE = [1, 1, 1];
+const FLAG_AXPAIN = [2, 8, 12, 11, 10, 4];
+const FLAG_PAIN = [2, 10, 10, 8, 4, 2];
 
 type ModelEntry =
   | { kind: 'alias'; model: AliasModel }
@@ -157,12 +169,12 @@ export class Renderer {
   private glow: SpriteBatch;
   private spriteMat: THREE.RawShaderMaterial;
   // per entity state (indexed by edict num)
-  private esSerial = new Int32Array(MAX_EDICTS).fill(-1);
-  private esModel: string[] = new Array(MAX_EDICTS).fill('');
-  private esFrame = new Int32Array(MAX_EDICTS);
-  private esOldFrame = new Int32Array(MAX_EDICTS);
-  private esFrameTime = new Float64Array(MAX_EDICTS);
-  private esOrigin = new Float32Array(MAX_EDICTS * 3);
+  private esSerial = new Int32Array(STATE_SLOTS).fill(-1);
+  private esModel: string[] = new Array(STATE_SLOTS).fill('');
+  private esFrame = new Int32Array(STATE_SLOTS);
+  private esOldFrame = new Int32Array(STATE_SLOTS);
+  private esFrameTime = new Float64Array(STATE_SLOTS);
+  private esOrigin = new Float32Array(STATE_SLOTS * 3);
   private esSeen = new Int32Array(MAX_EDICTS);
   private entIndex = new Int32Array(MAX_EDICTS);
   private frameNo = 0;
@@ -666,8 +678,8 @@ export class Renderer {
   /** Processes one entity: state tracking, trails and dlights, and queues its drawing. Returns true if drawn. */
   private entity(f: RenderFrame, i: number, time: number): boolean {
     const e = f.entities[i];
-    const num = e.num;
-    if (num < 0 || num >= MAX_EDICTS) return false;
+    const num = stateSlot(e.num); // state slot; also the dlight key
+    if (num < 0) return false;
     const entry = e.model ? this.getModel(e.model) : null;
     const ox = e.origin[0], oy = e.origin[1], oz = e.origin[2];
     // per-entity state
@@ -681,11 +693,11 @@ export class Renderer {
     }
     // effects dlights (CL_LinkPacketEntities / CL_LinkPlayers)
     const fx = e.effects;
-    if ((fx & (EF_BLUE | EF_RED)) === (EF_BLUE | EF_RED)) this.dl.set(num, ox, oy, oz, 200 + (Math.random() * 32 | 0), 0.1, 3);
-    else if (fx & EF_BLUE) this.dl.set(num, ox, oy, oz, 200 + (Math.random() * 32 | 0), 0.1, 1);
-    else if (fx & EF_RED) this.dl.set(num, ox, oy, oz, 200 + (Math.random() * 32 | 0), 0.1, 2);
-    else if (fx & EF_BRIGHTLIGHT) this.dl.set(num, ox, oy, oz + 16, 400 + (Math.random() * 32 | 0), 0.1, 0);
-    else if (fx & EF_DIMLIGHT) this.dl.set(num, ox, oy, oz, 200 + (Math.random() * 32 | 0), 0.1, 0);
+    if ((fx & (EF_BLUE | EF_RED)) === (EF_BLUE | EF_RED)) this.dl.set(num + 1, ox, oy, oz, 200 + (Math.random() * 32 | 0), 0.1, 3);
+    else if (fx & EF_BLUE) this.dl.set(num + 1, ox, oy, oz, 200 + (Math.random() * 32 | 0), 0.1, 1);
+    else if (fx & EF_RED) this.dl.set(num + 1, ox, oy, oz, 200 + (Math.random() * 32 | 0), 0.1, 2);
+    else if (fx & EF_BRIGHTLIGHT) this.dl.set(num + 1, ox, oy, oz + 16, 400 + (Math.random() * 32 | 0), 0.1, 0);
+    else if (fx & EF_DIMLIGHT) this.dl.set(num + 1, ox, oy, oz, 200 + (Math.random() * 32 | 0), 0.1, 0);
 
     if (!entry || entry.kind === 'none') return false;
     // trails (model flags)
@@ -695,7 +707,7 @@ export class Renderer {
         const px = this.esOrigin[num * 3], py = this.esOrigin[num * 3 + 1], pz = this.esOrigin[num * 3 + 2];
         const far = Math.abs(px - ox) > 128 || Math.abs(py - oy) > 128 || Math.abs(pz - oz) > 128;
         if (!fresh && !far) {
-          if (flags & MF_ROCKET) { this.particles.trail(px, py, pz, ox, oy, oz, 0); this.dl.set(num, ox, oy, oz, 200, 0.1, 0); }
+          if (flags & MF_ROCKET) { this.particles.trail(px, py, pz, ox, oy, oz, 0); this.dl.set(num + 1, ox, oy, oz, 200, 0.1, 0); }
           else if (flags & MF_GRENADE) this.particles.trail(px, py, pz, ox, oy, oz, 1);
           else if (flags & MF_GIB) this.particles.trail(px, py, pz, ox, oy, oz, 2);
           else if (flags & MF_ZOMGIB) this.particles.trail(px, py, pz, ox, oy, oz, 4);
@@ -758,10 +770,42 @@ export class Renderer {
     if (!this.settings.lerpFrames) lerp = 1;
     let yaw = e.angles[1];
     if (model.mdl.flags & MF_ROTATE) yaw = (time * 100) % 360;
+    if (fx & (EF_FLAG1 | EF_FLAG2)) this.addFlag(e.frame, ox, oy, oz, e.angles[0], yaw, e.angles[2], fx & EF_FLAG1 ? 0 : 1, time);
     const inst = this.allocAlias(e.alpha < 1);
     this.setupAlias(inst, model, e.model, e.frame, oldFrame, lerp, e.skin, e.colors ? ((e.colors.top & 15) << 4) | (e.colors.bottom & 15) : -1,
       fx, ox, oy, oz, e.angles[0], yaw, e.angles[2], e.alpha, time, false, 1);
     return true;
+  }
+
+  /**
+   * CL_AddFlagModels: a CTF carrier (EF_FLAG1 red / EF_FLAG2 blue) gets progs/flag.mdl on his
+   * back, pushed back further in the pain / attack frames; the flag waves through its frames at 10 Hz.
+   */
+  private addFlag(frame: number, ox: number, oy: number, oz: number, pitch: number, yaw: number, roll: number, team: number, time: number): void {
+    const entry = this.getModel('progs/flag.mdl');
+    if (entry.kind !== 'alias') return;
+    let f = 14;
+    if (frame >= 29 && frame <= 34) f += FLAG_AXPAIN[frame - 29];
+    else if (frame >= 35 && frame <= 40) f += FLAG_PAIN[frame - 35];
+    else if (frame >= 103 && frame <= 106) f += 6;
+    else if (frame >= 107 && frame <= 118) f += 7;
+    this.angleVectorsInto(pitch, yaw, roll, this.tmpF, this.tmpR);
+    const F = this.tmpF, R = this.tmpR;
+    F[2] = -F[2]; // "reverse z component"
+    const x = ox - f * F[0] + 22 * R[0], y = oy - f * F[1] + 22 * R[1], z = oz - f * F[2] + 22 * R[2] - 16;
+    const n = entry.model.mdl.frames.length;
+    const t10 = time * 10, fa = Math.floor(t10);
+    const inst = this.allocAlias(false);
+    this.setupAlias(inst, entry.model, 'progs/flag.mdl', (fa + 1) % n, fa % n, t10 - fa, team, -1, 0, x, y, z, pitch, yaw, roll - 45, 1, time, false, 1);
+  }
+  private tmpF = new Float32Array(3);
+  private tmpR = new Float32Array(3);
+
+  private angleVectorsInto(pitch: number, yaw: number, roll: number, F: Float32Array, R: Float32Array): void {
+    const cp = Math.cos(pitch * DEG), sp = Math.sin(pitch * DEG), cy = Math.cos(yaw * DEG), sy = Math.sin(yaw * DEG);
+    const cr = Math.cos(roll * DEG), sr = Math.sin(roll * DEG);
+    F[0] = cp * cy; F[1] = cp * sy; F[2] = -sp;
+    R[0] = -sr * sp * cy + cr * sy; R[1] = -sr * sp * sy - cr * cy; R[2] = -sr * cp;
   }
 
   private setupAlias(inst: AliasInst, model: AliasModel, name: string, frame: number, oldFrame: number, lerp: number, skin: number, colors: number,

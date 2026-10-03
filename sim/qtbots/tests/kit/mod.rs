@@ -413,12 +413,6 @@ impl TestWorld {
                     }
                     continue;
                 }
-                b"trigger_push" => {
-                    let e = &self.ents[i];
-                    let v = qtbots::math::scale(e.movedir, e.speed * 10.0);
-                    self.players[slot].pm.velocity = [v[0].clamp(-2000.0, 2000.0), v[1].clamp(-2000.0, 2000.0), v[2].clamp(-2000.0, 2000.0)];
-                    continue;
-                }
                 b"weapon_supershotgun" => { pl.items |= 2; pl.ammo[0] += 5.0; respawn = -1.0 }
                 b"weapon_nailgun" => { pl.items |= 4; pl.ammo[1] += 30.0; respawn = -1.0 }
                 b"weapon_supernailgun" => { pl.items |= 8; pl.ammo[1] += 30.0; respawn = -1.0 }

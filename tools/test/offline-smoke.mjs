@@ -32,11 +32,12 @@ try {
   await page.waitForFunction(() => window.__game && window.__game.debug().slot >= 0, null, { timeout: 90_000 });
   console.log('in the game, slot', await page.evaluate(() => window.__game.debug().slot));
   await page.waitForTimeout(1500);
-  await page.screenshot({ path: `${OUT}/offline-spawn.png` });
+  await page.screenshot({ path: `${OUT}/offline-${MAP}-spawn.png` });
 
   // scripted play: run, turn, jump, shoot
   const t0 = Date.now();
   let shot = 0;
+  let runShots = 0;
   await page.evaluate(() => { window.__game.testHold('forward', true); });
   while (Date.now() - t0 < SECS * 1000) {
     const k = (Date.now() - t0) / 1000;
@@ -47,12 +48,12 @@ try {
       g.testHold('jump', Math.floor(k * 3) % 4 === 0);
       if (Math.floor(k) % 5 === 0) g.testImpulse(7);
     }, k);
-    if (k > 4 && shot === 0) { await page.screenshot({ path: `${OUT}/offline-running.png` }); shot++; }
+    if (k > 4 && Math.floor(k / 5) > runShots) { runShots++; await page.screenshot({ path: `${OUT}/offline-${MAP}-${runShots}.png` }); if (shot === 0) shot++; }
     if (k > SECS / 2 && shot === 1) {
       await page.keyboard.down('Tab');
       await page.evaluate(() => window.__game.testHold('showscores', true));
       await page.waitForTimeout(300);
-      await page.screenshot({ path: `${OUT}/offline-scores.png` });
+      await page.screenshot({ path: `${OUT}/offline-${MAP}-scores.png` });
       await page.evaluate(() => window.__game.testHold('showscores', false));
       shot++;
     }
@@ -70,7 +71,7 @@ try {
   await page.keyboard.press('Backquote');
   const d = await page.evaluate(() => window.__game.debug());
   console.log(JSON.stringify({
-    fps: Math.round(d.fps), fpsNow: Math.round(d.fpsNow), stepUs: Math.round(d.stepUs), steps: d.steps, renderMs: +d.renderMs.toFixed(2),
+    fps: +d.fps.toFixed(1), fpsNow: +d.fpsNow.toFixed(1), frameMs: +(1000 / Math.max(0.01, d.fpsNow)).toFixed(1), stepUs: Math.round(d.stepUs), steps: d.steps, renderMs: +d.renderMs.toFixed(2),
     entities: d.entities, rollbacks: d.rollbacks, mispredictions: d.mispredictions, desyncs: d.desyncs, starvations: d.starvations,
     lead: d.lead, delayMs: Math.round(d.delayMs), clones: d.clones, decodes: d.decodes, liveWorlds: d.liveWorlds, health: d.health, frags: d.frags, pos: d.pos, map: d.map,
   }));

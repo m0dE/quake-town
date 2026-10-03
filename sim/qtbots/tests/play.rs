@@ -4,7 +4,7 @@
 
 mod kit;
 use kit::*;
-use qtbots::{BotWorld, Bots, NavGraph};
+use qtbots::{Bots, NavGraph};
 
 fn have_maps() -> bool {
     std::path::Path::new(&map_path(1)).exists()

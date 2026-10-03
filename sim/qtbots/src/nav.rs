@@ -50,6 +50,8 @@ pub const NODE_EDGE: u32 = 2;
 pub const NODE_VOID: u32 = 4;
 /// Head under water (drowning risk on long stretches).
 pub const NODE_DEEP: u32 = 8;
+/// Less than a jump's headroom above (no bunny hopping here).
+pub const NODE_LOWCEIL: u32 = 16;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Link {
@@ -198,8 +200,10 @@ impl<'a, W: BotWorld> Builder<'a, W> {
         let n = self.nodes.len() as u32;
         let head = self.w.point_contents([p[0], p[1], p[2] + 22.0]);
         let deep = head <= contents::WATER && head >= contents::LAVA;
+        let up = self.tr(p, [p[0], p[1], p[2] + 48.0]);
+        let low = up.fraction < 1.0;
         self.nodes.push(p);
-        self.flags.push(if water { NODE_WATER } else { 0 } | if deep { NODE_DEEP } else { 0 });
+        self.flags.push(if water { NODE_WATER } else { 0 } | if deep { NODE_DEEP } else { 0 } | if low { NODE_LOWCEIL } else { 0 });
         self.columns.entry(c).or_default().push(n);
         self.queue.push_back(n);
         Some(n)

@@ -102,9 +102,14 @@ node src/render/demo/shots.mjs maps=lqdm1,lqdm3 views=3    # screenshots + numbe
 npx tsx src/render/render.test.mjs                     # unit tests (loaders, atlas, PVS, light point, effects)
 ```
 
-Test data is LibreQuake (BSD-3), copied to `.cache/render-test/` (gitignored, never
-committed): `maps/lqdm1..13.bsp/.lit` from `quake-ref/full/id1/maps`, `pak0.pak` from
-`quake-ref/lite/id1`. Query string: `map`, `preset=classic|modern`, `fov`, `manual=1`
-(no rAF loop; `window.__qt` drives it). Keys: click for mouse look, WASD/QE fly, shift
-fast, 1/2 presets, F flashblend, B bloom, P drawflat, R rocket, G gunshot, L lightning,
-T teleport, M next map, H hide overlay.
+The test page and the tests read the built packs (`public/packs`: base, maps-lq, maps-qt;
+`npm run build:content`) through `src/content` (`createContent`), exactly like the game.
+Query string: `map`, `preset=classic|modern`, `fov`, `manual=1` (no rAF loop;
+`window.__qt` drives it), `preview=1` (menu character preview). Keys: click for mouse look,
+WASD/QE fly, shift fast, 1/2 presets, F flashblend, B bloom, P drawflat, R rocket,
+G gunshot, L lightning, T teleport, M next map, H hide overlay.
+
+Static entities (`makestatic`: torches, flames) arrive in `entities` with
+`num = 0x10000 + i`; the renderer keeps their state in a separate slot range.
+CTF carriers (`EF_FLAG1` red / `EF_FLAG2` blue) get `progs/flag.mdl` on their back
+(CL_AddFlagModels), waving at 10 Hz.

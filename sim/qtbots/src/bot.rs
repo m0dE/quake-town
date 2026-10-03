@@ -4,7 +4,7 @@
 
 use crate::astar::{astar, Scratch, NONE};
 use crate::math::*;
-use crate::nav::{GoalKind, LinkKind, NavGraph, NODE_VOID};
+use crate::nav::{GoalKind, LinkKind, NavGraph, NODE_LOWCEIL, NODE_VOID};
 use crate::ser::{hash_bytes, R, W};
 use crate::skill::{skill, Skill};
 use crate::{angle2short, it, short2angle, BotWorld, ClientInfo, UserCmd, Vec3, BUTTON_ATTACK, BUTTON_JUMP};
@@ -41,6 +41,10 @@ pub struct BotDebug {
     pub hopping: bool,
     pub chase: bool,
     pub yaw: f32,
+    pub chase_target: Vec3,
+    pub spawn: Vec3,
+    pub flag_home: [Vec3; 2],
+    pub link_kind: u8,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -93,6 +97,9 @@ struct Bot {
     flag_home: [Vec3; 2],
     flag_known: [bool; 2],
     spawn_pos: Vec3,
+    /// learned own flag: 0 unknown, 1 = team1 flag, 2 = team2 flag
+    own_flag: u8,
+    runup_until: f64,
 }
 
 /// What navigation wants this tick.
@@ -395,7 +402,26 @@ impl Bot {
         if flags.is_empty() {
             return None;
         }
-        if flags.iter().any(|f| f.5 == 0) {
+        // learn which flag is ours (mod-agnostic): the flag we carry is the enemy's; a
+        // flag lying at home that we stand on without taking it is ours
+        let has_key = me.items & (it::KEY1 | it::KEY2) != 0;
+        let loose: Vec<usize> = flags.iter().filter(|f| f.3 != 1).map(|f| f.0).collect();
+        if has_key && loose.len() == 1 {
+            self.own_flag = if loose[0] == 0 { 2 } else { 1 };
+        } else if !has_key {
+            for f in &flags {
+                if f.3 == 1 && self.flag_known[f.0] && dist(f.2, self.flag_home[f.0]) < 48.0 && dist2d(f.2, me.origin) < 20.0
+                    && (f.2[2] - me.origin[2]).abs() < 64.0
+                {
+                    self.own_flag = f.0 as u8 + 1;
+                }
+            }
+        }
+        if self.own_flag != 0 && flags.iter().any(|f| f.5 == 0) {
+            for f in flags.iter_mut() {
+                f.1 = f.0 as u8 + 1 == self.own_flag;
+            }
+        } else if flags.iter().any(|f| f.5 == 0) {
             // mod-agnostic: my flag is the one whose base is nearest to where I spawned
             let base = |f: &(usize, bool, Vec3, i32, u32, u32)| if self.flag_known[f.0] { self.flag_home[f.0] } else { f.2 };
             let mine = flags
@@ -418,6 +444,18 @@ impl Bot {
                 best = Some((sc, p));
             }
         };
+        // enemy flag carriers (QW CTF: IT_KEY1/2) are hunted, by everyone but our carrier
+        if !carrying {
+            for cs in 0..w.maxclients() {
+                if cs == slot {
+                    continue;
+                }
+                let Some(c) = w.client(cs) else { continue };
+                if c.alive && c.items & (it::KEY1 | it::KEY2) != 0 && self.is_enemy(w, me, &c) && me.team != 0 {
+                    consider(260.0, c.origin, me);
+                }
+            }
+        }
         for &(k, own, center, solid, owner, _) in &flags {
             let at_home = self.flag_known[k] && dist(center, self.flag_home[k]) < 48.0;
             if carrying {
@@ -565,6 +603,13 @@ impl Bot {
                 let dir = norm([d[0], d[1], 0.0]);
                 let along = dot(dir, [me.velocity[0], me.velocity[1], 0.0]);
                 let past = dot(sub(me.origin, cpos), dir);
+                if self.now < self.runup_until {
+                    // back off for a run-up
+                    out.target = Some(sub(cpos, scale(dir, 96.0)));
+                } else if dist2d(me.origin, cpos) < 40.0 && me.onground && along < 120.0 && past > -24.0 {
+                    self.runup_until = self.now + 0.4;
+                    out.target = Some(sub(cpos, scale(dir, 96.0)));
+                }
                 if past >= -2.0 && dist2d(me.origin, cpos) < 40.0 && me.onground && along > 200.0 {
                     out.jump = true;
                     self.air_target = npos;
@@ -592,6 +637,34 @@ impl Bot {
 
     /// Straight distance ahead along the goal path from the current node.
     fn straight_ahead(&self, nav: &NavGraph, me: &ClientInfo) -> (f32, Vec3) {
+        if self.goal == NONE && (self.chase || self.forced) && self.cur != NONE {
+            // along the A* path
+            let mut dir0: Option<Vec3> = None;
+            let mut length = 0.0;
+            let mut last = me.origin;
+            let mut prev = self.cur;
+            for &n in self.path.iter().take(14) {
+                let link_ok = nav.links_of(prev).iter().any(|l| l.to == n && l.kind == LinkKind::Walk);
+                let Some(node) = nav.node(n) else { break };
+                if !link_ok || (node.pos[2] - last[2]).abs() > 20.0 || node.flags & (NODE_VOID | NODE_LOWCEIL) != 0 {
+                    break;
+                }
+                let d = sub(node.pos, me.origin);
+                let d2 = norm([d[0], d[1], 0.0]);
+                match dir0 {
+                    None => dir0 = Some(d2),
+                    Some(d0) => {
+                        if dot(d0, d2) < 0.985 {
+                            break;
+                        }
+                    }
+                }
+                length = dist2d(me.origin, node.pos);
+                last = node.pos;
+                prev = n;
+            }
+            return (length, last);
+        }
         if self.goal == NONE || self.cur == NONE {
             return (0.0, me.origin);
         }
@@ -606,7 +679,7 @@ impl Bot {
             }
             let Some(node) = nav.node(l.to) else { break };
             let p = node.pos;
-            if (p[2] - last[2]).abs() > 20.0 || node.flags & NODE_VOID != 0 {
+            if (p[2] - last[2]).abs() > 20.0 || node.flags & (NODE_VOID | NODE_LOWCEIL) != 0 {
                 break;
             }
             let d = sub(p, me.origin);
@@ -734,6 +807,15 @@ impl Bot {
         {
             self.yaw = me.v_angle[1];
             self.pitch = me.v_angle[0];
+            // forced angles at a spawn spot = (re)spawned, also on a match start
+            for e in 1..w.num_edicts() {
+                if let Some(ent) = w.entity(e) {
+                    if ent.classname.starts_with(b"info_player") && dist(ent.origin, me.origin) < 48.0 {
+                        self.spawn_pos = me.origin;
+                        break;
+                    }
+                }
+            }
         }
         // localize on the graph
         let far = match nav.node(self.cur) {
@@ -741,7 +823,8 @@ impl Bot {
             None => true,
         };
         let flying = !me.onground && now < self.air_until && me.waterlevel < 2;
-        if !flying && (far || now >= self.relocalize_at) {
+        let running_up = now < self.runup_until + 1.0 && !far;
+        if !flying && !running_up && (far || now >= self.relocalize_at) {
             if far {
                 self.path.clear();
             }
@@ -1114,6 +1197,8 @@ impl Bot {
             w.bool(self.flag_known[k]);
         }
         w.v3(self.spawn_pos);
+        w.u8(self.own_flag);
+        w.f64(self.runup_until);
     }
 
     fn read(r: &mut R) -> Result<Bot, String> {
@@ -1174,6 +1259,8 @@ impl Bot {
             b.flag_known[k] = r.bool()?;
         }
         b.spawn_pos = r.v3()?;
+        b.own_flag = r.u8()?.min(2);
+        b.runup_until = r.f64()?;
         Ok(b)
     }
 }
@@ -1233,7 +1320,18 @@ impl Bots {
     }
     pub fn debug(&self, slot: u32) -> Option<BotDebug> {
         match self.bots.get(slot as usize) {
-            Some(Some(b)) => Some(BotDebug { node: b.cur, goal: b.goal, enemy: b.enemy, hopping: b.hop, chase: b.chase, yaw: b.yaw }),
+            Some(Some(b)) => Some(BotDebug {
+                node: b.cur,
+                goal: b.goal,
+                enemy: b.enemy,
+                hopping: b.hop,
+                chase: b.chase,
+                yaw: b.yaw,
+                chase_target: b.chase_target,
+                spawn: b.spawn_pos,
+                flag_home: b.flag_home,
+                link_kind: b.link_kind,
+            }),
             _ => None,
         }
     }

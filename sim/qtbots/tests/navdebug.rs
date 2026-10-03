@@ -128,19 +128,22 @@ fn debug_profile() {
 #[test]
 #[ignore]
 fn debug_walk() {
-    use qtbots::{BotWorld, Bots};
+    use qtbots::Bots;
     let m: u32 = std::env::var("MAP").ok().and_then(|x| x.parse().ok()).unwrap_or(13);
+    let bsp = std::env::var("BSP").unwrap_or_else(|_| map_path(m));
     let from: usize = std::env::var("FROM").ok().and_then(|x| x.parse().ok()).unwrap_or(0);
     let to: usize = std::env::var("TO").ok().and_then(|x| x.parse().ok()).unwrap_or(2);
-    let mut w = TestWorld::load(&map_path(m), 2, 7);
+    let mut w = TestWorld::load(&bsp, 2, 7);
     w.combat = false;
     let nav = NavGraph::build(&mut w);
     let mut bots = Bots::new(2);
     bots.add(0, 3);
     w.spawn_player(0);
-    let a = w.ents[w.spawns[from]].origin;
+    let mut a = w.ents[w.spawns[from % w.spawns.len()]].origin;
+    let mut b = w.ents[w.spawns[to % w.spawns.len()]].origin;
+    if let Ok(v) = std::env::var("A") { let p: Vec<f32> = v.split(',').map(|x| x.parse().unwrap()).collect(); a = [p[0], p[1], p[2]]; }
+    if let Ok(v) = std::env::var("B") { let p: Vec<f32> = v.split(',').map(|x| x.parse().unwrap()).collect(); b = [p[0], p[1], p[2]]; }
     w.set_spawn_point(0, [a[0], a[1], a[2] + 1.0]);
-    let b = w.ents[w.spawns[to]].origin;
     eprintln!("from {:?} to {:?}", a, b);
     bots.force_goal(0, Some(b));
     for t in 0..3000 {
@@ -153,7 +156,7 @@ fn debug_walk() {
             let d = bots.debug(0).unwrap();
             let cur = nav.node(d.node).map(|n| n.pos);
             let links: Vec<_> = nav.links_of(d.node).iter().map(|l| (l.to, l.kind)).collect();
-            eprintln!("t {:4} pos {:?} vel {:?} og {} cur {} {:?} cmd f{} s{} b{} yaw {:.0} | links {:?}", t, p.pm.origin.map(|x| x as i32), p.pm.velocity.map(|x| x as i32), p.pm.onground, d.node, cur.map(|c| c.map(|x| x as i32)), cmd.forward, cmd.side, cmd.buttons, d.yaw, &links[..links.len().min(6)]);
+            eprintln!("t {:4} pos {:?} vel {:?} og {} cur {} {:?} cmd f{} s{} b{} yaw {:.0} lk {:?} | links {:?}", t, p.pm.origin.map(|x| x as i32), p.pm.velocity.map(|x| x as i32), p.pm.onground, d.node, cur.map(|c| c.map(|x| x as i32)), cmd.forward, cmd.side, cmd.buttons, d.yaw, (d.link_kind, d.chase, d.goal), &links[..links.len().min(6)]);
         }
         if qtbots::math::dist(p.pm.origin, b) < 48.0 { eprintln!("arrived at t {}", t); break; }
         if p.pm.origin[2] < -1000.0 { eprintln!("fell"); break; }

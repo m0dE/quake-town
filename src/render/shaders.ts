@@ -317,6 +317,7 @@ uniform vec3 uUp;
 uniform vec3 uCam;
 uniform vec3 uFwd;
 uniform float uSize;
+uniform float uRound;
 in vec3 position;          // corner -1..1
 in vec4 iPos;              // xyz, size scale
 in vec4 iColor;            // rgb, alpha
@@ -329,6 +330,8 @@ void main() {
   vec3 p = iPos.xyz + (uRight * position.x + uUp * position.y) * s;
   vC = position.xy;
   vColor = iColor;
+  // modern: particles inside the eye (your own teleport splash) fade instead of filling the screen
+  if (uRound > 0.5) vColor.a *= smoothstep(8.0, 32.0, d);
   gl_Position = projectionMatrix * viewMatrix * vec4(p, 1.0);
 }
 `;

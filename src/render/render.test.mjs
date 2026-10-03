@@ -1,6 +1,6 @@
 // Renderer unit tests (no GPU): loaders, lightmap atlas, PVS/culling, light point, MDL/SPR,
 // particles, palette.   npx tsx src/render/render.test.mjs
-// Needs the LibreQuake test data in .cache/render-test/ (maps/*.bsp, pak0.pak) — see README.
+// Reads the built packs in public/packs (npm run build:content) through src/content.
 // Copyright (C) 2026 Quake Town contributors. GPL-2.0-or-later.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -11,12 +11,13 @@ import { WorldGeometry } from './world.ts';
 import { loadMdl, loadSpr, mdlPose } from './mdl.ts';
 import { Palette, playerTranslation } from './palette.ts';
 import { Particles, Dlights } from './effects.ts';
-import { PakVfs } from './demo/pakvfs.ts';
+import { PackVfs, openPack } from '../content/index.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const data = path.join(root, '.cache/render-test');
-if (!fs.existsSync(path.join(data, 'pak0.pak'))) {
-  console.log('SKIP: no test data in .cache/render-test (see src/render/README.md)');
+const packsDir = path.join(root, 'public/packs');
+const index = fs.existsSync(path.join(packsDir, 'index.json')) ? JSON.parse(fs.readFileSync(path.join(packsDir, 'index.json'), 'utf8')) : [];
+if (!index.find((p) => p.name === 'base')) {
+  console.log('SKIP: no built packs in public/packs (npm run build:content)');
   process.exit(0);
 }
 let n = 0;
@@ -25,8 +26,13 @@ const test = (name, fn) => {
   try { fn(); n++; console.log(`ok ${name} (${(performance.now() - t0).toFixed(0)} ms)`); } catch (e) { console.error(`FAIL ${name}`); throw e; }
 };
 
-const vfs = new PakVfs();
-vfs.mountPak(new Uint8Array(fs.readFileSync(path.join(data, 'pak0.pak'))));
+const vfs = new PackVfs();
+for (const name of ['base', 'maps-lq', 'maps-qt']) {
+  const e = index.find((p) => p.name === name);
+  if (!e) continue;
+  const bytes = new Uint8Array(fs.readFileSync(path.join(packsDir, e.file)));
+  vfs.mount({ id: e.id, name, role: name === 'base' ? 'base' : 'room', archive: openPack(bytes), bytes: bytes.length });
+}
 const pal = Palette.fromVfs(vfs);
 const STYLES = new Float32Array(64).fill(1);
 
@@ -45,12 +51,11 @@ test('palette: player translation (rows 1 and 6 forward, rows 8..13 backwards)',
   assert.equal(t[0], 0); assert.equal(t[255], 255);
 });
 
-const maps = fs.readdirSync(path.join(data, 'maps')).filter((f) => f.endsWith('.bsp')).sort();
+const maps = vfs.list('maps/').filter((f) => f.endsWith('.bsp') && !/^maps\/b_/.test(f)).map((f) => f.slice(5));
 for (const m of maps) {
   test(`world: ${m}`, () => {
-    const bytes = new Uint8Array(fs.readFileSync(path.join(data, 'maps', m)));
-    const litp = path.join(data, 'maps', m.replace('.bsp', '.lit'));
-    const lit = fs.existsSync(litp) ? new Uint8Array(fs.readFileSync(litp)) : null;
+    const bytes = vfs.get('maps/' + m);
+    const lit = vfs.get('maps/' + m.replace('.bsp', '.lit'));
     const bsp = loadBsp(bytes, lit);
     if (lit) assert.ok(bsp.lit, '.lit accepted');
     const g = new WorldGeometry(bsp);

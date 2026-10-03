@@ -31,6 +31,7 @@ import {
 import { createQtApp, TICRATE, TICK_SECONDS, type QtApp, type QtSim, type QtState } from '../sim/qtsim.js';
 import { encodeCmd, parseInfo, cleanCommand } from '../sim/wire.js';
 import { NetSession } from '../net/session.js';
+import { rememberNodeRtt } from '../rooms/ping.js';
 import { TicRing } from './ring.js';
 import { ViewCalc, poseFrom, newPose, lerpAngle, angleVectors, type SelfPose } from './view.js';
 import { TopDownView, type RendererLike } from './topdown.js';
@@ -644,7 +645,12 @@ export class Game {
     if (now >= this.pingAt) {
       this.pingAt = now + 3000;
       const rtt = net.lockstep.roundTripMs;
-      if (rtt !== null && !net.offline) net.sendAppMessage({ ping: Math.round(rtt) });
+      if (rtt !== null && !net.offline) {
+        net.sendAppMessage({ ping: Math.round(rtt) });
+        // the server list shows this node's real ping next time
+        const node = net.nodeId;
+        if (node) rememberNodeRtt(node, rtt);
+      }
     }
     void this.helloAt;
   }
@@ -975,7 +981,9 @@ export class Game {
     const rows = snap ? this.scoreRows(now, snap) : { rows: [], teams: [] };
     let match = this.match;
     if (match && cv) {
-      const tnow = this.simTimeAt(others);
+      // ClientView word 49 is the sim's own time (f32); the derived clock is the fallback
+      const simTime = f32(cv)[CV.time];
+      const tnow = simTime > 0 ? simTime : this.simTimeAt(others);
       const fcv = f32(cv);
       const phase = cv[CV.phase];
       const end = fcv[CV.phaseEnd] || this.matchEnd;

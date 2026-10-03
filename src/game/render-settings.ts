@@ -6,7 +6,7 @@ import { PRESETS, type RenderSettings } from '../render/types.js';
 import type { Cvars } from '../console/cvars.js';
 
 const WATCHED = ['r_preset', 'r_bloom', 'r_ssao', 'r_tonemap', 'r_dynamic', 'gl_flashblend', 'gl_texturemode', 'r_drawflat',
-  'r_fullbrightskins', 'r_waterwarp', 'r_drawviewmodel', 'r_lerpmodels', 'gamma', 'r_scale', 'r_particles'];
+  'r_fullbrightskins', 'r_waterwarp', 'r_drawviewmodel', 'r_lerpmodels', 'r_lerpframes', 'r_wateralpha', 'gamma', 'r_scale', 'r_particles'];
 
 export function renderSettingsFromCvars(c: Cvars): Partial<RenderSettings> {
   const preset = c.get('r_preset') === 'classic' ? PRESETS.classic : PRESETS.modern;
@@ -24,7 +24,8 @@ export function renderSettingsFromCvars(c: Cvars): Partial<RenderSettings> {
     fullbrightSkins: on('r_fullbrightskins', false),
     waterWarp: on('r_waterwarp', preset.waterWarp),
     drawViewModel: on('r_drawviewmodel', true),
-    lerpFrames: on('r_lerpmodels', true),
+    lerpFrames: on('r_lerpframes', on('r_lerpmodels', true)),
+    waterAlpha: c.has('r_wateralpha') ? Math.max(0, Math.min(1, c.num('r_wateralpha'))) : preset.waterAlpha,
     gamma: c.has('gamma') ? 1 / Math.max(0.3, c.num('gamma') || 1) : 1,
     resolutionScale: c.has('r_scale') ? Math.max(0.25, Math.min(1, c.num('r_scale') || 1)) : 1,
     particles: c.has('r_particles') && c.num('r_particles') === 0 ? preset.particles : preset.particles,

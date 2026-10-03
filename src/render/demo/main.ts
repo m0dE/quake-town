@@ -6,10 +6,10 @@
 import { Renderer } from '../renderer';
 import { renderCharacterPreview } from '../preview';
 import {
-  CLASSIC_SETTINGS, EF_BLUE, EF_RED, EV_MUZZLEFLASH, EV_TEMP_ENTITY, MODERN_SETTINGS, TE_EXPLOSION, TE_GUNSHOT, TE_LIGHTNING2,
+  CLASSIC_SETTINGS, EF_BLUE, EF_FLAG1, EF_FLAG2, EF_RED, EV_MUZZLEFLASH, EV_TEMP_ENTITY, MODERN_SETTINGS, TE_EXPLOSION, TE_GUNSHOT, TE_LIGHTNING2,
   TE_TELEPORT, createRenderFrame, type RenderEntity, type RenderFrame,
 } from '../types';
-import { PakVfs, fetchBytes } from './pakvfs';
+import { createContent, MemoryStore } from '../../content/index';
 
 const params = new URLSearchParams(location.search);
 const MAPS = Array.from({ length: 13 }, (_, i) => `lqdm${i + 1}`);
@@ -29,7 +29,9 @@ Object.assign(LIGHTSTYLES, {
 interface Thing { model: string; x: number; y: number; z: number; yaw: number; frame: number; skin: number; effects: number; kind: 'static' | 'player'; top?: number; bottom?: number; run?: number }
 interface Rocket { sx: number; sy: number; sz: number; ex: number; ey: number; ez: number; t0: number; dur: number; serial: number }
 
-const vfs = new PakVfs();
+// the real content path: built-in packs from public/packs (base + maps-lq + maps-qt)
+const content = createContent({ store: new MemoryStore() });
+const vfs = content.vfs;
 let renderer: Renderer;
 const frame: RenderFrame = createRenderFrame(512, 256);
 frame.lightstyles = LIGHTSTYLES;
@@ -73,11 +75,6 @@ const COLORS: [number, number][] = [[4, 4], [13, 13], [12, 11], [3, 3], [9, 9], 
 
 async function loadMap(name: string): Promise<void> {
   mapName = name;
-  for (const ext of ['bsp', 'lit']) {
-    if (vfs.has(`maps/${name}.${ext}`)) continue;
-    const d = await fetchBytes(`/render-test/maps/${name}.${ext}`);
-    if (d) vfs.add(`maps/${name}.${ext}`, d);
-  }
   await renderer.loadMap(name);
   const ents = renderer.mapEntities();
   spawns = [];
@@ -99,7 +96,8 @@ async function loadMap(name: string): Promise<void> {
     const s = spawns[i];
     const [top, bottom] = COLORS[i % COLORS.length];
     things.push({
-      model: 'progs/player.mdl', x: s.x, y: s.y, z: s.z, yaw: s.yaw, frame: 6, skin: 0, effects: i === 1 ? EF_BLUE : i === 2 ? EF_RED : 0,
+      model: 'progs/player.mdl', x: s.x, y: s.y, z: s.z, yaw: s.yaw, frame: 6, skin: 0,
+      effects: i === 1 ? EF_BLUE : i === 2 ? EF_RED : i === 3 ? EF_FLAG1 : i === 4 ? EF_FLAG2 : 0,
       kind: 'player', top, bottom, run: i % 3,
     });
   }
@@ -279,10 +277,9 @@ declare global {
 }
 
 async function main(): Promise<void> {
-  hud.textContent = 'loading pak0…';
-  const pak = await fetchBytes('/render-test/pak0.pak');
-  if (!pak) { hud.textContent = 'missing .cache/render-test/pak0.pak'; return; }
-  vfs.mountPak(pak);
+  hud.textContent = 'loading packs…';
+  await content.loadBase();
+  await content.loadRoom([{ id: 'maps-lq' }, { id: 'maps-qt' }]);
   if (params.get('preview') === '1') {
     // menu character preview on a 2:3 canvas over a dark gradient
     canvas.remove();

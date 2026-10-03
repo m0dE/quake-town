@@ -102,7 +102,7 @@ try {
       lastLog = k;
       const ds = await Promise.all(pages.map((p) => p.evaluate(() => ({ d: window.__game.debug(), t: window.__game.totals() }))));
       // hashes at a frame every page has confirmed
-      const common = (Math.min(...ds.map((x) => x.t.frame)) - 8) & ~3;   // hashed frames: multiples of HASH_EVERY (4)
+      const common = (Math.min(...ds.map((x) => x.t.frame)) - 8) & ~3;   // a multiple of 4 works for any HASH_EVERY in 1, 2, 4
       const hs = await Promise.all(pages.map((p) => p.evaluate((f) => window.__game.session.lockstep.world.hashAt(f), common)));
       if (hs.every((h) => h !== undefined)) {
         hashChecks.compared++;
