@@ -85,7 +85,8 @@ export function showMenu(root: HTMLElement, deps: MenuDeps = {}): Promise<PlayRe
   };
 
   const finish = (req: Omit<PlayRequest, 'serverinfo' | 'identity' | 'nodeUrl'>): void => {
-    if (!live) return;
+    console.info('[menu] play', req.roomId, req.offline ? '(offline)' : '', req.spectate ? '(spectate)' : '');
+    if (!live) { console.warn('[menu] play ignored: the menu is no longer live'); return; }
     const full: PlayRequest = {
       ...req,
       serverinfo: toServerinfo(req.config),
@@ -286,11 +287,16 @@ function openJoin(ctx: MenuCtx, roomId: string, config: RoomConfig, opts: { spec
 
   const close = (): void => { dlg.close(); dlg.remove(); };
   const go = async (spectate: boolean): Promise<void> => {
-    if (config.password) {
-      if (!(await passwordMatches(config.password, pw.value))) { err.textContent = 'That password is not right.'; pw.focus(); pw.select(); return; }
+    try {
+      if (config.password) {
+        if (!(await passwordMatches(config.password, pw.value))) { err.textContent = 'That password is not right.'; pw.focus(); pw.select(); return; }
+      }
+      close();
+      ctx.play({ roomId, config, spectate, ...(config.password ? { password: pw.value } : {}) });
+    } catch (e) {
+      console.error('[menu] join failed', e);
+      err.textContent = `Could not join: ${e instanceof Error ? e.message : String(e)}`;
     }
-    close();
-    ctx.play({ roomId, config, spectate, ...(config.password ? { password: pw.value } : {}) });
   };
 
   const dlg = h('dialog.join', { 'aria-label': `Join ${config.name}` },

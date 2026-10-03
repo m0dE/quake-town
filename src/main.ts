@@ -142,7 +142,23 @@ function playerId(): string {
   } catch { return `p${Math.random().toString(36).slice(2, 12)}`; }
 }
 
-function status(text: string): void { loading.classList.remove('hidden'); loadingText.textContent = text; }
+function status(text: string): void { loading.classList.remove('hidden'); loadingText.textContent = text; console.info('[status]', text); }
+
+// Nothing may fail silently: an uncaught error is shown on the page, not only in the console.
+function showFatal(what: string): void {
+  let el = document.getElementById('qt-fatal');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'qt-fatal';
+    el.style.cssText = 'position:fixed;left:12px;right:12px;bottom:12px;z-index:2147483647;padding:10px 14px;background:#3a1208;color:#ffd9c2;border:1px solid #c4502a;font:13px/1.4 system-ui,sans-serif;white-space:pre-wrap;cursor:pointer';
+    el.title = 'Click to dismiss';
+    el.onclick = () => el!.remove();
+    document.body.append(el);
+  }
+  el.textContent = `Something went wrong: ${what}`;
+}
+window.addEventListener('error', (e) => { if (!/ResizeObserver/.test(e.message)) showFatal(e.message || String(e.error)); });
+window.addEventListener('unhandledrejection', (e) => showFatal(e.reason instanceof Error ? e.reason.message : String(e.reason)));
 
 async function makeRenderer(canvas: HTMLCanvasElement, vfs: Vfs): Promise<RendererLike | null> {
   const load = rendererModules['./render/renderer.ts'];
@@ -202,8 +218,11 @@ async function prepare(config: RoomConfig, serverinfo: string): Promise<{ vfs: V
 }
 
 async function play(req: PlayRequest, demo?: DemoFile): Promise<void> {
-  if (starting || current) return;
+  console.info('[play]', req.roomId, { starting, inGame: !!current });
+  if (starting) { status('Still starting the last game…'); return; }
+  if (current) leaveQuietly();
   starting = true;
+  status('Loading');
   menuRoot.classList.add('hidden');
   try {
     const { hideMenu } = await import('./menu/index.js');
@@ -240,6 +259,15 @@ async function play(req: PlayRequest, demo?: DemoFile): Promise<void> {
   } finally {
     starting = false;
   }
+}
+
+/** End the running game without going back to the menu (a new game is about to start). */
+function leaveQuietly(): void {
+  const g = current;
+  if (!g) return;
+  current = null;
+  (window as unknown as { __game?: Game }).__game = undefined;
+  g.dispose();
 }
 
 function leave(reason = ''): void {
