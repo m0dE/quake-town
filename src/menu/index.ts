@@ -23,6 +23,8 @@ export { roomFromHash, roomLink } from '../rooms/index.js';
 
 declare const __BUILD_REV__: string;
 const REV = typeof __BUILD_REV__ === 'string' ? __BUILD_REV__ : 'dev';
+/** The source this build was made from: the repo at its commit (the repo itself for a dev build). */
+const SOURCE_URL = `https://github.com/m0dE/quake-town${REV === 'dev' ? '' : `/tree/${REV}`}`;
 
 /** The top bar's buttons; the servers (the lobby) are home, and Customize opens from the character. */
 const NAV: { id: ScreenId; label: string; hint: string }[] = [
@@ -126,7 +128,7 @@ export function showMenu(root: HTMLElement, deps: MenuDeps = {}): Promise<PlayRe
   const footer = h('footer.foot', {},
     h('a', { href: 'LICENSE.txt', target: '_blank', rel: 'noopener' }, 'Licence (GPL-2.0-or-later)'),
     h('a', { href: 'ASSET-LICENSES.txt', target: '_blank', rel: 'noopener' }, 'Art and map credits'),
-    h('a', { href: 'source.zip', download: '' }, 'Source code'),
+    h('a', { href: SOURCE_URL, target: '_blank', rel: 'noopener' }, 'Source code'),
     h('span.rev', { title: 'Build' }, `build ${REV}`),
     h('span.tm', {}, 'Not affiliated with id Software. Game art: LibreQuake.'),
   );

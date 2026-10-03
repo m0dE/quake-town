@@ -64,7 +64,7 @@
 
 ## Integrator
 
-9. Add `export/` to `.gitignore` (tools/export.mjs already skips it in source.zip).
+9. Add `export/` to `.gitignore`.
 10. Register the `quake-town` app on cloud.arrr.fun (fps 77) and build with
     `VITE_ARRR_APP_ID=<id>`; `DEFAULT_APP_ID` in `src/rooms/listing.ts` is a placeholder until
     then (listing fails soft: standing servers still show and join). Optionally

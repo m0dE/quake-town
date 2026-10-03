@@ -2,7 +2,7 @@
 /**
  * The web build, packaged for arrr.fun (after doom-arrr's and vibe-strike's tools/export.mjs).
  *
- *   npm run export                    # typecheck, vite build, licences, source.zip, zip
+ *   npm run export                    # typecheck, vite build, licences, zip
  *   npm run export -- --no-build      # re-package what is already in export/quake-town
  *   npm run export -- --no-typecheck  # skip tsc (vite still builds)
  *
@@ -11,17 +11,14 @@
  *     LICENSE.txt             GPL-2.0 (the repository's LICENSE)
  *     ASSET-LICENSES.txt      LibreQuake BSD-3 COPYING + CREDITS, per-map credits from
  *                             public/packs/index.json, the menu fonts' SIL OFL 1.1 texts
- *     source.zip              the complete corresponding source (GPL-2.0 §3(a)): every
- *                             tracked and untracked-but-not-ignored file, incl. build
- *                             scripts, map sources (.map / generators), the QuakeC mod and
- *                             the Rust sim — minus the built packs (data, rebuilt by
- *                             `npm run build:content` / `build:mod`), screenshots and export/
  *     README.txt              what this is, and its sizes in KB
  *   export/quake-town.zip     the upload: deterministic (fixed timestamps, sorted entries)
  *   export/BUILD.txt          commit, app id, sizes, sha256
  *
  * arrr.fun's rules are checked before an upload rather than after: index.html at the zip
  * root, ≤ 5000 files, ≤ 100 MiB inflated, no absolute asset paths, no zip64.
+ *
+ * The source is not bundled: the menu footer, ASSET-LICENSES.txt and README.txt point at SOURCE_URL.
  *
  * Licence: GPL-2.0-or-later.
  */
@@ -42,6 +39,8 @@ const ZIP = path.join(OUT, `${SLUG}.zip`);
 const MAX_FILES = 5000;
 const MAX_BYTES = 100 * 1024 * 1024;
 const DEFAULT_APP_ID = 'quake-town';
+let CRC = null; // crc32()'s table, built on first use
+const REPO_URL = 'https://github.com/m0dE/quake-town';
 
 const kb = (n) => `${Math.round(n / 1024).toLocaleString('en-US')} KB`;
 const mib = (n) => `${(n / 1024 / 1024).toFixed(1)} MiB`;
@@ -67,6 +66,8 @@ let head = 'dev';
 try { head = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim(); } catch { /* not a checkout */ }
 let dirty = false;
 try { dirty = execFileSync('git', ['status', '--porcelain', '--', '.'], { cwd: ROOT, encoding: 'utf8' }).trim() !== ''; } catch { /* not a checkout */ }
+/** The source this build was made from: the repo at its commit, as the menu footer links it. */
+const SOURCE_URL = head === 'dev' ? REPO_URL : `${REPO_URL}/tree/${head}`;
 
 // ---------------------------------------------------------------------------- licences
 
@@ -94,7 +95,7 @@ let assets = [
   '',
   'The program (everything compiled from source: the JavaScript, the simulation',
   'qtsim.wasm and the QuakeC progs in the qtdm pack) is GPL-2.0-or-later: LICENSE.txt,',
-  'source in source.zip. The data below is under its own licences.',
+  `source at ${SOURCE_URL}. The data below is under its own licences.`,
   '"QUAKE" is a trademark of id Software / ZeniMax. Quake Town is not affiliated with them;',
   'no id Software data is distributed here.',
   '',
@@ -115,7 +116,7 @@ for (const pack of index) {
 }
 if (mapLines.length) {
   assets += section('Maps in the built-in packs',
-    `${mapLines.join('\n')}\n\nThe lqdm maps are LibreQuake's (BSD-3-Clause, above). Maps by "Quake Town" are\noriginal to this project and are GPL-2.0-or-later with their sources in source.zip\n(content/maps/).`);
+    `${mapLines.join('\n')}\n\nThe lqdm maps are LibreQuake's (BSD-3-Clause, above). Maps by "Quake Town" are\noriginal to this project and are GPL-2.0-or-later with their sources at\n${SOURCE_URL} (content/maps/).`);
 }
 
 const fontDir = 'src/menu/fonts';
@@ -123,53 +124,6 @@ for (const f of walk(path.join(ROOT, fontDir)).filter((x) => /\.txt$/i.test(x)))
   assets += section(`Menu font licence: ${f}`, read(`${fontDir}/${f}`).toString('utf8'));
 }
 writeFileSync(path.join(SITE, 'ASSET-LICENSES.txt'), assets);
-
-// ---------------------------------------------------------------------------- source.zip
-
-/** The source as built: tracked + untracked-but-not-ignored files; never export/, built packs, screenshots. */
-function sourceFiles() {
-  let list;
-  try {
-    list = execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', '.'], { cwd: ROOT, encoding: 'utf8' })
-      .split('\0').filter(Boolean);
-  } catch {
-    list = walk(ROOT).filter((f) => !/^(node_modules|dist|sim\/target|\.cache|test-results)\//.test(f));
-  }
-  return [...new Set(list)]
-    .filter((f) => !f.startsWith(`${path.relative(ROOT, OUT)}/`) && !f.startsWith('node_modules/') && !f.startsWith('docs/shots/'))
-    // Built packs are data (rebuilt from content/ and mod/ by the build scripts) and dominate the size.
-    .filter((f) => !/^public\/packs\/.*\.(pk3|pak)$/i.test(f))
-    .filter((f) => existsSync(path.join(ROOT, f)) && statSync(path.join(ROOT, f)).isFile())
-    .sort();
-}
-
-const note = [
-  'Quake Town — complete corresponding source',
-  '',
-  `Built from commit ${head}${dirty ? ' plus uncommitted changes (included here as built)' : ''}.`,
-  '',
-  'Licence: GPL-2.0-or-later (LICENSE). The simulation (sim/) ports id Software\'s',
-  'QuakeWorld server and pmove (GPL-2.0-or-later); the default mod (mod/qtdm) ports',
-  "id's qw-qc. Game data is LibreQuake (BSD-3-Clause, assets-licenses/).",
-  '',
-  'Not included: the built packs public/packs/*.pk3 (data). Rebuild them with',
-  '`npm run build:content` (maps from content/maps + LibreQuake data) and',
-  '`npm run build:mod` (QuakeC in mod/qtdm → qwprogs.dat → qtdm pack).',
-  '',
-  'Build: npm install; npm run build:sim (Rust + wasm32-unknown-unknown);',
-  'npm run build:mod; npm run build:content; npm run dev (or npm run export).',
-  '',
-].join('\n');
-
-const srcEntries = sourceFiles().map((f) => ({ name: `quake-town/${f}`, data: read(f) }));
-srcEntries.push({ name: 'quake-town/SOURCE-NOTE.txt', data: Buffer.from(note) });
-srcEntries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-const srcZip = zip(srcEntries);
-writeFileSync(path.join(SITE, 'source.zip'), srcZip);
-for (const need of ['src/menu/index.ts', 'tools/export.mjs', 'package.json']) {
-  if (!srcEntries.some((e) => e.name === `quake-town/${need}`)) fail(`source.zip is missing ${need}`);
-}
-console.log(`source.zip: ${srcEntries.length} files, ${kb(srcZip.length)}`);
 
 // ---------------------------------------------------------------------------- sizes + README
 
@@ -184,17 +138,19 @@ const wasmFile = files.find((f) => /qtsim\.wasm$/.test(f));
 const packFiles = files.filter((f) => /^packs\/.*\.(pk3|pak)$/.test(f));
 const basePack = packFiles.find((f) => /\/base-[0-9a-f]+\.pk3$/.test(f));
 
+const jsGz = sum(js, (f) => gz(siteFile(f)));
+const cssGz = sum(css, (f) => gz(siteFile(f)));
+const wasmGz = wasmFile ? gz(siteFile(wasmFile)) : 0;
 const sizeRows = [
-  ['JavaScript', sum(js, (f) => siteFile(f).length), sum(js, (f) => gz(siteFile(f))), `${js.length} file(s)`],
-  ['CSS', sum(css, (f) => siteFile(f).length), sum(css, (f) => gz(siteFile(f))), `${css.length} file(s)`],
+  ['JavaScript', sum(js, (f) => siteFile(f).length), jsGz, `${js.length} file(s)`],
+  ['CSS', sum(css, (f) => siteFile(f).length), cssGz, `${css.length} file(s)`],
   ['Fonts (woff2)', sum(fonts, (f) => siteFile(f).length), null, `${fonts.length} file(s)`],
-  ['qtsim.wasm', wasmFile ? siteFile(wasmFile).length : 0, wasmFile ? gz(siteFile(wasmFile)) : 0, wasmFile ? '' : 'MISSING'],
+  ['qtsim.wasm', wasmFile ? siteFile(wasmFile).length : 0, wasmGz, wasmFile ? '' : 'MISSING'],
   ['base pack', basePack ? siteFile(basePack).length : 0, null, basePack ?? 'MISSING'],
   ['all packs', sum(packFiles, (f) => siteFile(f).length), null, `${packFiles.length} pack(s)`],
   ['index.html', siteFile('index.html').length, gz(siteFile('index.html')), ''],
-  ['source.zip', srcZip.length, null, `${srcEntries.length} files`],
 ];
-const firstLoad = sizeRows[0][2] + sizeRows[1][2] + (sizeRows[3][2] ?? 0) + (basePack ? siteFile(basePack).length : 0);
+const firstLoad = jsGz + cssGz + wasmGz + (basePack ? siteFile(basePack).length : 0);
 const table = sizeRows.map(([what, raw, gzipped, extra]) =>
   `  ${what.padEnd(14)} ${kb(raw).padStart(10)}${gzipped === null ? ''.padStart(16) : `  ${kb(gzipped).padStart(9)} gz`}   ${extra}`).join('\n');
 
@@ -213,8 +169,8 @@ const readme = [
   '  map packs are fetched when a room needs them.',
   '',
   'Licences: LICENSE.txt (GPL-2.0-or-later, the program), ASSET-LICENSES.txt (LibreQuake',
-  'BSD-3-Clause art and maps, map credits, menu fonts SIL OFL 1.1), source.zip (the',
-  'complete corresponding source).',
+  'BSD-3-Clause art and maps, map credits, menu fonts SIL OFL 1.1).',
+  `Source: ${SOURCE_URL}`,
   '',
 ].join('\n');
 writeFileSync(path.join(SITE, 'README.txt'), readme);
@@ -228,7 +184,7 @@ if (bytes > MAX_BYTES) fail(`${mib(bytes)}; arrr.fun takes at most ${mib(MAX_BYT
 const html = siteFile('index.html').toString('utf8');
 const absolute = [...html.matchAll(/(?:src|href)="(\/[^"]*)"/g)].map((m) => m[1]);
 if (absolute.length) fail(`index.html asks for ${absolute.length} file(s) by absolute path (${absolute[0]})`);
-for (const need of ['LICENSE.txt', 'ASSET-LICENSES.txt', 'source.zip', 'README.txt']) {
+for (const need of ['LICENSE.txt', 'ASSET-LICENSES.txt', 'README.txt']) {
   if (!files.includes(need)) fail(`the site has no ${need}`);
 }
 if (!wasmFile) console.warn('warning: no qtsim.wasm in the site (npm run build:sim)');
@@ -241,7 +197,6 @@ function crcTable() {
   for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; }
   return t;
 }
-var CRC = null; // var: zip() runs above this line, before a let would be initialised
 function crc32(buf) { CRC ??= crcTable(); let c = 0xffffffff; for (let i = 0; i < buf.length; i++) c = CRC[(c ^ buf[i]) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; }
 
 /** A deterministic zip: entries in the order given, 1980-01-01 timestamps, no unix modes, no zip64. */
