@@ -19,7 +19,7 @@ async function tickProbe(roomId) {
   const at = [];
   let fps = 0;
   const conn = await connect(roomId, {
-    appId: APP, centralServiceUrl: CENTRAL, fps: 77, user: { id: `tickprobe${Date.now()}` },
+    appId: APP, centralServiceUrl: CENTRAL, fps: 20, user: { id: `tickprobe${Date.now()}` },
     onConnect: (_s, _i, _f, _n, f) => { fps = f; },
     onTick: (frame) => { at.push([frame, performance.now()]); },
     onDisconnect: () => {}, onError: () => {},
