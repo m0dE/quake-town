@@ -15,6 +15,7 @@
  *   ?probe=1                  install the arrr harness probe (arena judge)
  *   ?exec=<commands>          console text run at boot (tests: "r_preset classic")
  */
+import { APP_ID as LISTED_APP_ID, API_KEY as LISTED_API_KEY } from './rooms/listing.js';
 import './main.css';
 import { lockstep } from 'arrr-network';
 import { cvars as settingsCvars, binds, configs, settings, userinfo as settingsUserinfo, account } from './settings/index.js';
@@ -37,7 +38,8 @@ declare const __BUILD_REV__: string;
 
 const params = new URLSearchParams(location.search);
 const central = params.get('central') ?? undefined;
-const APP_ID = params.get('app') ?? (import.meta.env.VITE_ARRR_APP_ID as string | undefined) ?? 'quake-town';
+const APP_ID = params.get('app') ?? LISTED_APP_ID;
+const API_KEY = params.get('app') ? undefined : LISTED_API_KEY;
 const FAKE = params.get('fake') === '1';
 
 const root = document.getElementById('app')!;
@@ -216,7 +218,7 @@ async function play(req: PlayRequest, demo?: DemoFile): Promise<void> {
     const game = await Game.start({
       sim: p.sim, progsId: p.progsId, maps: p.maps, serverinfo: req.serverinfo, packs: p.packs,
       roomId: req.roomId, offline: !!req.offline, spectate: !!req.spectate,
-      appId: APP_ID, central, nodeUrl: params.get('nodeUrl') ?? params.get('via') ?? req.nodeUrl,
+      appId: APP_ID, apiKey: API_KEY, central, nodeUrl: params.get('nodeUrl') ?? params.get('via') ?? req.nodeUrl,
       identity: req.identity, playerId: playerId(),
       vfs: p.vfs, host: gameHost,
       makeRenderer: (canvas) => (fake ? Promise.resolve(null) : makeRenderer(canvas, p.vfs)),

@@ -19,11 +19,22 @@ import { REGIONS, overFull, planRooms, regionOf, type RegionId } from './regions
 
 /**
  * The app on the ARRR network: the rooms it lists and joins, and the app a player signs
- * in to — ONE id, because a session token is scoped to its app. `VITE_ARRR_APP_ID` at
- * build time sets it. The default is a placeholder until the integrator registers the
- * `quake-town` app (fps 77) on cloud.arrr.fun; listing it just fails soft.
+ * in to — ONE id, because a session token is scoped to its app. `quake-town` on
+ * cloud.arrr.fun; `VITE_ARRR_APP_ID` at build time overrides it (a local cluster).
  */
-export const DEFAULT_APP_ID = 'quake-town';
+export const DEFAULT_APP_ID = 'app_1791016487876_fc841221364b';
+
+/** The app's API key: it ships in every client, so it is attribution, not a secret. */
+export const DEFAULT_API_KEY = 'arrr_583bec3540214916dff373439c8c07c2d210ef94423b4d0530a5424759184b63';
+export const API_KEY: string | undefined = (() => {
+  try {
+    const env = (import.meta as unknown as { env?: Record<string, string> }).env;
+    if (env?.VITE_ARRR_APP_ID && !env.VITE_ARRR_API_KEY) return undefined; // another app: its own key or none
+    return (env?.VITE_ARRR_API_KEY ?? '').trim() || DEFAULT_API_KEY;
+  } catch {
+    return DEFAULT_API_KEY;
+  }
+})();
 export const APP_ID: string = (() => {
   try {
     return ((import.meta as unknown as { env?: Record<string, string> }).env?.VITE_ARRR_APP_ID ?? '').trim() || DEFAULT_APP_ID;

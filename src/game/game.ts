@@ -63,6 +63,7 @@ export interface GameOptions {
   offline: boolean;
   spectate: boolean;
   appId: string;
+  apiKey?: string;
   central?: string;
   nodeUrl?: string;
   identity?: IdentitySession | null;
@@ -221,6 +222,7 @@ export class Game {
         app: this.app,
         room: opts.roomId,
         appId: opts.appId,
+        ...(opts.apiKey ? { apiKey: opts.apiKey } : {}),
         centralServiceUrl: opts.central,
         nodeUrl: opts.nodeUrl,
         playerId: opts.playerId,
