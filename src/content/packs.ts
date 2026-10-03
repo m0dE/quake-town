@@ -31,6 +31,9 @@ export async function fetchBytes(url: string, opts: { limit?: number; expected?:
   const f = opts.fetchImpl ?? fetch;
   const res = await f(url, opts.reload ? { credentials: 'omit', cache: 'reload' } : { credentials: 'omit' });
   if (!res.ok) throw new PackError(`download failed: HTTP ${res.status} for ${url}`);
+  // A proxy, tunnel or captive page answering in the pack's place sends a web page
+  const ct = res.headers.get('content-type') ?? '';
+  if (/text\/html/i.test(ct)) throw new PackError(`download of ${url} returned a web page (${ct}), not the pack: something between this browser and the server answered instead`);
   const len = Number(res.headers.get('content-length') || 0);
   // content-length is the encoded size when the server compresses; only trust it as an upper bound check
   if (len > limit && !res.headers.get('content-encoding')) throw new PackError(`pack too large: ${len} bytes (at most ${limit})`);
