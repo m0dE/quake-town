@@ -39,7 +39,7 @@ const ZIP = path.join(OUT, `${SLUG}.zip`);
 const MAX_FILES = 5000;
 const MAX_BYTES = 100 * 1024 * 1024;
 const DEFAULT_APP_ID = 'quake-town';
-const SOURCE_URL = 'https://github.com/m0dE/quake-town';
+const REPO_URL = 'https://github.com/m0dE/quake-town';
 
 const kb = (n) => `${Math.round(n / 1024).toLocaleString('en-US')} KB`;
 const mib = (n) => `${(n / 1024 / 1024).toFixed(1)} MiB`;
@@ -65,6 +65,8 @@ let head = 'dev';
 try { head = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim(); } catch { /* not a checkout */ }
 let dirty = false;
 try { dirty = execFileSync('git', ['status', '--porcelain', '--', '.'], { cwd: ROOT, encoding: 'utf8' }).trim() !== ''; } catch { /* not a checkout */ }
+/** The source this build was made from: the repo at its commit, as the menu footer links it. */
+const SOURCE_URL = head === 'dev' ? REPO_URL : `${REPO_URL}/tree/${head}`;
 
 // ---------------------------------------------------------------------------- licences
 
