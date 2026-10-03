@@ -253,9 +253,13 @@ async function play(req: PlayRequest, demo?: DemoFile): Promise<void> {
     game.onLeave = (reason) => leave(reason);
     if (params.get('probe') === '1') void installProbe(game);
   } catch (err) {
-    console.error(err);
+    console.error('[play] could not start', err);
     loading.classList.add('hidden');
-    void showMenu(`Could not start: ${err instanceof Error ? err.message : String(err)}`);
+    const msg = `Could not start: ${err instanceof Error ? err.message : String(err)}`;
+    showFatal(msg);
+    // the room link would reopen the join dialog over the notice: drop it
+    try { history.replaceState(null, '', location.pathname + location.search); } catch { /* sandboxed */ }
+    void showMenu(msg);
   } finally {
     starting = false;
   }

@@ -216,7 +216,8 @@ export function showMenu(root: HTMLElement, deps: MenuDeps = {}): Promise<PlayRe
     for (const cb of indexListeners) { try { cb(); } catch (err) { console.error(err); } }
   });
 
-  const fromHash = roomFromHash(location.hash);
+  // a notice means we are back from a failed or ended game: do not reopen the room it was
+  const fromHash = deps.notice ? null : roomFromHash(location.hash);
   if (fromHash) openJoin(ctx, fromHash.roomId, fromHash.config, {});
   else if (/^#room=/.test(location.hash)) toast('That room link is not a Quake Town room, or it is from a newer version.');
 
