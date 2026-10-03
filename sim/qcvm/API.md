@@ -3,6 +3,12 @@
 Status: **published, stable**. Any later change is listed here first.
 
 Changes:
+- 2026-10-03 (perf, engine §6): `hash`/`hash_into` and `serialize` use the raw VM words
+  (no per-word type lookup). VM memory is NaN-canonical by construction (interpreter
+  float ops and all float setters canonicalise), so this is deterministic; the byte
+  layout of `serialize` is unchanged and `deserialize(serialize(vm))` is now bit-exact
+  even for ints that look like NaNs. Hash values changed (bump sim_version).
+  `hash` of a qwprogs lqdm1 world: 22 us -> 8.7 us native.
 - 2026-10-03 (additions only, nothing changed): `vm.call_name`, `vm.parse_globals`,
   `vm.edict_text`, `vm.stack_trace`, `vm.executing`, `vm.current_function`,
   `vm.check_ent`, `vm.set_parm_i`, `vm.return_i`, `vm.globals()`, `vm.string_bytes`,
@@ -206,7 +212,7 @@ let w2 = vm.clone();                         // full independent copy (Arc'd pro
 let mut buf = Vec::new(); vm.serialize(&mut buf);       // appends; little-endian words
 let (vm2, used) = Vm::deserialize(progs.clone(), &buf)?; // validates everything; Err on
                                              // bad/mismatched data (progs fingerprint checked)
-vm.hash() -> u64 ; vm.hash_into(&mut qcvm::StateHasher)  // canonicalises NaN in float-typed words
+vm.hash() -> u64 ; vm.hash_into(&mut qcvm::StateHasher)  // raw words, 4-lane mixing
 ```
 Serialize only between calls (not from inside a builtin). The stopped/error state,
 config, edicts (+ free/freetime/serial), globals, all strings, tokenize state and PRNG

@@ -56,6 +56,30 @@ impl StateHasher {
             self.u32(w);
         }
     }
+    /// Raw words, 4 independent 64-bit lanes of word pairs (fast path for VM memory,
+    /// which is NaN-canonical by construction).
+    pub fn words_fast(&mut self, ws: &[u32]) {
+        self.u32(ws.len() as u32);
+        let mut l0 = self.h;
+        let mut l1 = self.h ^ 0x9e37_79b9_7f4a_7c15;
+        let mut l2 = self.h ^ 0x3c6e_f372_fe94_f82a;
+        let mut l3 = self.h ^ 0xdaa6_6d2c_7ddf_743f;
+        let mut it = ws.chunks_exact(8);
+        for c in &mut it {
+            l0 = (l0.rotate_left(5) ^ (c[0] as u64 | (c[1] as u64) << 32)).wrapping_mul(K);
+            l1 = (l1.rotate_left(5) ^ (c[2] as u64 | (c[3] as u64) << 32)).wrapping_mul(K);
+            l2 = (l2.rotate_left(5) ^ (c[4] as u64 | (c[5] as u64) << 32)).wrapping_mul(K);
+            l3 = (l3.rotate_left(5) ^ (c[6] as u64 | (c[7] as u64) << 32)).wrapping_mul(K);
+        }
+        self.u64(l0);
+        self.u64(l1);
+        self.u64(l2);
+        self.u64(l3);
+        for &w in it.remainder() {
+            self.u32(w);
+        }
+    }
+
     /// Words where `is_float[i]` marks float-typed words: those are NaN-canonicalised.
     pub fn words_typed(&mut self, ws: &[u32], is_float: &[bool]) {
         self.u32(ws.len() as u32);

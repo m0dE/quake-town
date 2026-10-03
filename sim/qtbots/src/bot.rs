@@ -92,6 +92,7 @@ struct Bot {
     under_since: f64,
     flag_home: [Vec3; 2],
     flag_known: [bool; 2],
+    spawn_pos: Vec3,
 }
 
 /// What navigation wants this tick.
@@ -313,17 +314,7 @@ impl Bot {
         if self.cur == NONE {
             return;
         }
-        // carrying an enemy flag? (a non-solid enemy flag right on top of us)
-        let mut carrying = false;
-        for g in &nav.goals {
-            if let GoalKind::Flag(_) = g.kind {
-                if let Some(e) = w.entity(g.ent) {
-                    if e.team != me.team && e.solid != 1 && (e.owner == me.entnum || dist(e.origin, me.origin) < 64.0) {
-                        carrying = true;
-                    }
-                }
-            }
-        }
+        let carrying = false;
         let jitter = (w.random() & 0xffff) as usize;
         let mut best: Option<(f32, u32)> = None;
         for (gi, g) in nav.goals.iter().enumerate() {
@@ -333,7 +324,8 @@ impl Bot {
             let Some(d) = nav.goal_dist(gi, self.cur) else { continue };
             let mut v = match g.kind {
                 GoalKind::Spawn => 2.0 + ((jitter.wrapping_mul(gi * 2654435761 + 1) >> 7) % 8) as f32 * 0.5,
-                GoalKind::Flag(_) => self.goal_value(w, me, g.kind, g.ent, g.pos, carrying),
+                GoalKind::Flag(_) => continue, // live flags: see flag_goal
+
                 kind => {
                     let Some(e) = w.entity(g.ent) else { continue };
                     if e.solid != 1 || e.model.is_empty() || e.modelindex == 0 {
@@ -374,10 +366,7 @@ impl Bot {
 
     /// Best CTF objective: (score, point).
     fn flag_goal<W: BotWorld>(&mut self, w: &mut W, nav: &NavGraph, me: &ClientInfo, slot: u32) -> Option<(f32, Vec3)> {
-        if me.team == 0 {
-            return None;
-        }
-        // live flags: (team index 0/1, own?, center, solid, owner, entity)
+        // live flags: (team index 0/1, own?, center, solid, owner, team known)
         let mut flags: Vec<(usize, bool, Vec3, i32, u32, u32)> = Vec::new();
         for e in 1..w.num_edicts() {
             let Some(ent) = w.entity(e) else { continue };
@@ -387,7 +376,9 @@ impl Bot {
                 _ => continue,
             };
             let center = if ent.absmax == ent.absmin { ent.origin } else { scale(add(ent.absmin, ent.absmax), 0.5) };
-            let own = ent.team != 0 && ent.team == me.team;
+            // own flag: same `.team` when the mod sets it; else decided below by spawn base
+            let own = ent.team != 0 && me.team != 0 && ent.team == me.team;
+            let team_known = ent.team != 0 && me.team != 0;
             if !self.flag_known[k] {
                 // home: where the graph saw it, else where we first see it lying still
                 let home = nav.goals.iter().find(|g| g.ent == e && matches!(g.kind, GoalKind::Flag(_))).map(|g| g.pos);
@@ -399,16 +390,30 @@ impl Bot {
                     self.flag_known[k] = true;
                 }
             }
-            flags.push((k, own, center, ent.solid, ent.owner, e));
+            flags.push((k, own, center, ent.solid, ent.owner, if team_known { 1 } else { 0 }));
         }
         if flags.is_empty() {
             return None;
         }
-        let carrying = flags.iter().any(|f| !f.1 && f.3 != 1 && (f.4 == me.entnum || dist(f.2, me.origin) < 64.0));
+        if flags.iter().any(|f| f.5 == 0) {
+            // mod-agnostic: my flag is the one whose base is nearest to where I spawned
+            let base = |f: &(usize, bool, Vec3, i32, u32, u32)| if self.flag_known[f.0] { self.flag_home[f.0] } else { f.2 };
+            let mine = flags
+                .iter()
+                .map(|f| (dist(base(f), self.spawn_pos), f.0))
+                .fold((f32::MAX, 9), |a, b| if b.0 < a.0 { b } else { a })
+                .1;
+            for f in flags.iter_mut() {
+                f.1 = f.0 == mine;
+            }
+        }
+        let carrying = me.items & (it::KEY1 | it::KEY2) != 0
+            || flags.iter().any(|f| !f.1 && f.3 != 1 && (f.4 == me.entnum || dist(f.2, me.origin) < 64.0));
         let mut best: Option<(f32, Vec3)> = None;
         let mut consider = |v: f32, p: Vec3, me: &ClientInfo| {
+            // objectives are worth a long walk: weaker distance decay than items
             let d = dist(p, me.origin) * 1.3;
-            let sc = v / (1.0 + d / 700.0);
+            let sc = v / (1.0 + d / 2000.0);
             if best.map_or(true, |(b, _)| sc > b) {
                 best = Some((sc, p));
             }
@@ -719,6 +724,9 @@ impl Bot {
             self.jump_prev = false;
             return cmd;
         }
+        if self.dead_ticks > 0 || self.ticks == 1 || self.spawn_pos == [0.0; 3] {
+            self.spawn_pos = me.origin;
+        }
         self.dead_ticks = 0;
         // the engine forced our angles (spawn, teleport): adopt them
         if wrap180(me.v_angle[1] - short2angle(self.sent_yaw16)).abs() > 1.5
@@ -910,9 +918,11 @@ impl Bot {
             };
             let mut v = add(scale(yaw_dir(ey), radial * 0.7), yaw_dir(ey + 90.0 * self.strafe));
             if let Some(t) = travel_target {
-                if self.goal != NONE && dist(t, me.origin) > 8.0 {
+                if (self.goal != NONE || self.chase) && dist(t, me.origin) > 8.0 {
                     let dt = sub(t, me.origin);
-                    v = add(v, scale(norm([dt[0], dt[1], 0.0]), 0.8));
+                    // a flag carrier runs home and only shoots on the way
+                    let k = if me.items & (it::KEY1 | it::KEY2) != 0 { 3.0 } else { 0.8 };
+                    v = add(v, scale(norm([dt[0], dt[1], 0.0]), k));
                 }
             }
             move_yaw = Some(yaw_of(v));
@@ -978,10 +988,14 @@ impl Bot {
         let deliberate = matches!(self.link_kind, 1 | 2 | 3 | 5) && !fighting;
         if let (Some(my), false, false) = (move_yaw, deliberate, flying || me.waterlevel >= 2) {
             let v2 = [me.velocity[0], me.velocity[1], 0.0];
-            let probe = add(me.origin, add(scale(yaw_dir(my), 24.0), scale(v2, 0.12)));
-            let start = [probe[0], probe[1], me.origin[2]];
-            let t = w.trace(start, crate::PLAYER_MINS, crate::PLAYER_MAXS, [start[0], start[1], start[2] - 128.0], true, me.entnum);
-            if !t.startsolid && t.fraction >= 1.0 {
+            let void_at = |w: &mut W, p: Vec3| -> bool {
+                let a = [p[0], p[1], me.origin[2]];
+                let t = w.trace(a, [0.0; 3], [0.0; 3], [a[0], a[1], a[2] - 160.0], true, me.entnum);
+                !t.startsolid && t.fraction >= 1.0
+            };
+            // where we will be in ~0.15 s plus a little in the wished direction
+            let near = add(me.origin, add(scale(yaw_dir(my), 16.0), scale(v2, 0.15)));
+            if void_at(w, near) {
                 self.hop = false;
                 want_jump = false;
                 if fighting {
@@ -992,6 +1006,13 @@ impl Bot {
                     _ => yaw_of(scale(v2, -1.0)),
                 };
                 move_yaw = Some(back);
+            } else if want_jump && !nv.jump {
+                // a jump flies ~0.65 s: only where the landing has a floor
+                let far = add(me.origin, add(scale(yaw_dir(my), 40.0), scale(v2, 0.65)));
+                if void_at(w, far) {
+                    want_jump = false;
+                    self.hop = false;
+                }
             }
         }
         // breathe: surface after a few seconds under water
@@ -1092,6 +1113,7 @@ impl Bot {
             w.v3(self.flag_home[k]);
             w.bool(self.flag_known[k]);
         }
+        w.v3(self.spawn_pos);
     }
 
     fn read(r: &mut R) -> Result<Bot, String> {
@@ -1151,6 +1173,7 @@ impl Bot {
             b.flag_home[k] = r.v3()?;
             b.flag_known[k] = r.bool()?;
         }
+        b.spawn_pos = r.v3()?;
         Ok(b)
     }
 }

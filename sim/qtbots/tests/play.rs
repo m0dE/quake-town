@@ -68,3 +68,69 @@ fn bots_walk_between_spawn_points() {
     eprintln!("spawn-to-spawn walks: {}/{}", ok, total);
     assert!(ok * 10 >= total * 8, "only {}/{} walks arrived", ok, total);
 }
+
+/// 8 bots fighting on a map: twin worlds agree tick by tick, a serialize/deserialize
+/// mid-match continues identically, and the think cost is measured.
+fn match_run(m: u32, ticks: u32, seed: u64, restore_at: Option<u32>) -> (Vec<u64>, f64, TestWorld) {
+    let mut w = TestWorld::load(&map_path(m), 8, seed);
+    let nav = NavGraph::build(&mut w);
+    let mut bots = Bots::new(8);
+    for s in 0..8 {
+        bots.add(s, 1 + (s % 5) as u8);
+        w.spawn_player(s as usize);
+    }
+    let mut hashes = Vec::new();
+    let mut cpu = 0.0;
+    for t in 0..ticks {
+        if restore_at == Some(t) {
+            let mut buf = Vec::new();
+            bots.serialize(&mut buf);
+            let (b2, used) = Bots::deserialize(&buf).unwrap();
+            assert_eq!(used, buf.len());
+            assert_eq!(b2.hash(), bots.hash());
+            bots = b2;
+        }
+        bots.begin_tick();
+        let t0 = cpu_time();
+        for s in 0..8 {
+            let cmd = bots.think(&mut w, &nav, s);
+            w.players[s as usize].cmd = cmd;
+        }
+        cpu += cpu_time() - t0;
+        w.tick();
+        let mut h = bots.hash();
+        for p in &w.players {
+            h = h.rotate_left(7) ^ p.pm.origin[0].to_bits() as u64 ^ (p.pm.origin[1].to_bits() as u64) << 32;
+        }
+        hashes.push(h);
+    }
+    (hashes, cpu, w)
+}
+
+#[test]
+fn bots_fight_deterministically_and_cheaply() {
+    if !have_maps() {
+        return;
+    }
+    let ticks = 6000;
+    for m in [1u32, 3, 6] {
+        let (a, cpu, w) = match_run(m, ticks, 11, None);
+        let (b, _, _) = match_run(m, ticks, 11, Some(3000));
+        for t in 0..ticks as usize {
+            assert_eq!(a[t], b[t], "lqdm{} diverged at tick {}", m, t);
+        }
+        let frags: i32 = w.players.iter().map(|p| p.frags).sum();
+        let pickups: u32 = w.players.iter().map(|p| p.pickups).sum();
+        let shots: u32 = w.players.iter().map(|p| p.shots).sum();
+        let hits: u32 = w.players.iter().map(|p| p.hits).sum();
+        let maxs = w.players.iter().map(|p| p.max_speed).fold(0.0, f32::max);
+        let us = cpu * 1e6 / (ticks as f64 * 8.0);
+        eprintln!(
+            "lqdm{}: 8 bots x {} ticks: {:.1} us/bot/tick, frags {} pickups {} shots {} hits {} ({:.0}%), max speed {:.0}",
+            m, ticks, us, frags, pickups, shots, hits, 100.0 * hits as f64 / shots.max(1) as f64, maxs
+        );
+        assert!(frags > 5, "bots should kill each other");
+        assert!(pickups > 20, "bots should pick up items");
+        assert!(us < 30.0, "bot think too slow: {:.1} us", us);
+    }
+}

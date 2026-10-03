@@ -5,7 +5,7 @@
 //! Format (little-endian u32 words unless noted), version `QCV1`:
 //! magic, version, progs fingerprint (2 words), config (7 words), flags, rng (4 words),
 //! globals (len + words), num_edicts, edict words, meta (3 words each), strings,
-//! tokens, stop error. Floats are written NaN-canonicalised in float-typed words.
+//! tokens, stop error. Words are raw (VM memory is NaN-canonical by construction).
 
 use crate::error::{ErrorKind, VmError};
 use crate::hash::StateHasher;
@@ -13,27 +13,16 @@ use crate::progs::Progs;
 use crate::rng::Pcg32;
 use crate::strings::{rehash, Strings, TEMP_SLOTS};
 use crate::vm::{Meta, Vm, VmConfig, DEFAULT_BUDGET};
-use crate::CANON_NAN_BITS;
 use std::sync::Arc;
 
 const MAGIC: u32 = 0x3156_4351; // "QCV1"
 const VERSION: u32 = 1;
 
-#[inline]
-fn canon_word(w: u32, is_float: bool) -> u32 {
-    if is_float && (w & 0x7F80_0000) == 0x7F80_0000 && (w & 0x007F_FFFF) != 0 {
-        CANON_NAN_BITS
-    } else {
-        w
-    }
-}
-
-/// Append words (NaN-canonicalised where `is_float`) as little-endian bytes.
-fn put_typed(out: &mut Vec<u8>, ws: &[u32], is_float: &[bool]) {
+fn put_raw(out: &mut Vec<u8>, ws: &[u32]) {
     let start = out.len();
     out.resize(start + ws.len() * 4, 0);
-    for ((dst, &x), &f) in out[start..].chunks_exact_mut(4).zip(ws.iter()).zip(is_float.iter()) {
-        dst.copy_from_slice(&canon_word(x, f).to_le_bytes());
+    for (dst, &x) in out[start..].chunks_exact_mut(4).zip(ws.iter()) {
+        dst.copy_from_slice(&x.to_le_bytes());
     }
 }
 
@@ -111,12 +100,11 @@ impl Vm {
         w.u32((self.rng.inc >> 32) as u32);
         w.u32(self.globals.len() as u32);
         w.0.reserve(4 * (self.globals.len() + self.edicts.len() + 3 * self.meta.len()) + self.strings.used_bytes() + 256);
-        put_typed(w.0, &self.globals, &self.progs.global_float);
+        // raw words: VM memory is NaN-canonical by construction, and a raw copy makes
+        // deserialize(serialize(vm)) bit-identical (also for ints that look like NaNs)
+        put_raw(w.0, &self.globals);
         w.u32(self.num_edicts);
-        let ff = &self.progs.field_float;
-        for ed in self.edicts.chunks_exact(self.ef as usize) {
-            put_typed(w.0, ed, ff);
-        }
+        put_raw(w.0, &self.edicts);
         for m in &self.meta {
             w.u32(m.free as u32);
             w.u32(crate::canon(m.freetime).to_bits());
@@ -291,18 +279,17 @@ impl Vm {
         Ok((vm, r.p))
     }
 
-    /// Mix the whole state into `h` (NaN canonicalised in float-typed words).
+    /// Mix the whole state into `h` (raw words; see `serialize`).
     pub fn hash_into(&self, h: &mut StateHasher) {
         h.u32(MAGIC);
         h.u32(self.world_locked as u32);
         h.u64(self.rng.state);
         h.u64(self.rng.inc);
-        h.words_typed(&self.globals, &self.progs.global_float);
+        // VM memory is NaN-canonical by construction (interpreter float ops and float
+        // setters canonicalise), so raw words hash deterministically.
+        h.words_fast(&self.globals);
         h.u32(self.num_edicts);
-        let ff = &self.progs.field_float;
-        for ed in self.edicts.chunks_exact(self.ef as usize) {
-            h.words_typed(ed, ff);
-        }
+        h.words_fast(&self.edicts);
         for m in &self.meta {
             h.u32(m.free as u32);
             h.f32(m.freetime);

@@ -123,8 +123,10 @@ pub struct Progs {
     field_index: Vec<(Box<[u8]>, u32)>,
     global_index: Vec<(Box<[u8]>, u32)>,
     /// Per field word: true if the word belongs to a float or vector field.
+    #[allow(dead_code)]
     pub(crate) field_float: Vec<bool>,
     /// Per global word: true if float/vector typed.
+    #[allow(dead_code)]
     pub(crate) global_float: Vec<bool>,
 }
 

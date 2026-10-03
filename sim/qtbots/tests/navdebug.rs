@@ -180,3 +180,36 @@ fn debug_route() {
         if n == nav.goals[gi].node { break; }
     }
 }
+
+#[test]
+#[ignore]
+fn debug_falls() {
+    use qtbots::Bots;
+    let path = std::env::var("BSP").unwrap();
+    let mut w = TestWorld::load(&path, 6, 3);
+    let nav = NavGraph::build(&mut w);
+    let st = nav.stats();
+    eprintln!("graph {:?}", st);
+    let minz = nav.nodes.iter().map(|n| n.pos[2]).fold(f32::MAX, f32::min);
+    let mut bots = Bots::new(6);
+    for s in 0..6 { bots.add(s, 1 + (s % 5) as u8); w.spawn_player(s as usize); }
+    let mut falls = 0;
+    for _t in 0..23100 {
+        bots.begin_tick();
+        for s in 0..6 { let c = bots.think(&mut w, &nav, s); w.players[s as usize].cmd = c; }
+        w.tick();
+        for s in 0..6usize {
+            let o = w.players[s].pm.origin;
+            let hurt = w.ents.iter().any(|e| e.classname == b"trigger_hurt" && (0..3).all(|k| o[k] + [16.0,16.0,32.0][k] > e.origin[k] + e.mins[k] && o[k] - [16.0,16.0,24.0][k] < e.origin[k] + e.maxs[k]));
+            let _ = minz;
+            if w.players[s].alive && hurt {
+                let d = bots.debug(s as u32).unwrap();
+                eprintln!("fall slot {} at t {:.1} pos {:?} node {} {:?} hop {} enemy {}", s, w.time, w.players[s].pm.origin, d.node, nav.node(d.node).map(|n| (n.pos, n.flags)), d.hopping, d.enemy);
+                falls += 1;
+                w.players[s].alive = false; w.players[s].dead_time = w.time; w.players[s].deaths += 1;
+            }
+        }
+    }
+    let frags: i32 = w.players.iter().map(|p| p.frags).sum();
+    eprintln!("falls {} frags {}", falls, frags);
+}
