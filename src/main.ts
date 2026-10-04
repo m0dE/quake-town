@@ -64,6 +64,8 @@ const gameHost = document.getElementById('game')!;
 const menuRoot = document.getElementById('menu')!;
 const loading = document.getElementById('loading')!;
 const loadingText = document.getElementById('loading-text')!;
+const loadingBar = document.getElementById('loading-bar')!;
+const loadingFill = loadingBar.firstElementChild as HTMLElement;
 
 // ------------------------------------------------------------------ console + settings
 
@@ -83,13 +85,21 @@ if (params.get('exec')) cmds.exec(params.get('exec')!);
 const content = createContent();
 const loader = content.loader;
 const BUILTIN_ROOM_PACKS = ['maps-lq', 'maps-qt', 'qtdm'];
-/** Everything a match needs starts downloading now (the loader caches by sha256). */
-const prefetchPacks = (async () => {
+/**
+ * Everything a match needs starts downloading now (the loader caches by sha256), one pack at a
+ * time: two concurrent downloads of one URL make Chromium fail one (ERR_CACHE_WRITE_FAILURE).
+ * The base pack first, which is all the menu waits for; the room packs after it, in the background.
+ */
+const prefetch = { done: 0, total: 0 };
+const prefetchBase = (async () => {
   try {
     await loader.index();
-    // one at a time: the loader caches each verified pack by sha256 for the mounts that follow
-    for (const n of ['base', ...BUILTIN_ROOM_PACKS]) await loader.resolve({ id: n }).catch((e) => console.warn(`[boot] prefetch ${n}:`, e));
+    await loader.resolve({ id: 'base' }, (d, t) => { prefetch.done = d; prefetch.total = t; }).catch((e) => console.warn('[boot] prefetch base:', e));
   } catch (err) { console.warn('[boot] pack prefetch:', err); }
+})();
+const prefetchPacks = (async () => {
+  await prefetchBase;
+  for (const n of BUILTIN_ROOM_PACKS) await loader.resolve({ id: n }).catch((e) => console.warn(`[boot] prefetch ${n}:`, e));
 })();
 const wasmBytes: Promise<Uint8Array | null> = FAKE ? Promise.resolve(null) : fetch('qtsim.wasm').then(async (r) => (r.ok ? new Uint8Array(await r.arrayBuffer()) : null)).catch(() => null);
 const gameModule = import('./game/game.js');
@@ -107,13 +117,27 @@ let basePromise: Promise<{ vfs: Vfs; gfx: Gfx }> | null = null;
  */
 function base(): Promise<{ vfs: Vfs; gfx: Gfx }> {
   basePromise ??= (async () => {
-    await prefetchPacks;
+    await prefetchBase;
     try { await content.loadBase(); } catch (err) { console.warn('[boot] no base pack:', err); }
     gfx = new Gfx(content.vfs);
     return { vfs: content.vfs, gfx };
   })();
   return basePromise;
 }
+
+/** Wait for `p` with the loading screen up, its bar following the base pack's download. */
+async function bootLoading<T>(p: Promise<T>): Promise<T> {
+  let done = false;
+  void p.finally(() => { done = true; });
+  const tick = (): void => {
+    if (done) return;
+    status(prefetch.total ? `Loading ${mb(prefetch.done)} / ${mb(prefetch.total)} MB` : 'Loading', prefetch.total ? prefetch.done / prefetch.total : 0);
+    setTimeout(tick, 100);
+  };
+  tick();
+  try { return await p; } finally { loading.classList.add('hidden'); }
+}
+const mb = (n: number): string => (n / 1048576).toFixed(1);
 
 // ------------------------------------------------------------------ the console when no match is up
 
@@ -160,7 +184,13 @@ function playerId(): string {
   } catch { return `p${Math.random().toString(36).slice(2, 12)}`; }
 }
 
-function status(text: string): void { loading.classList.remove('hidden'); loadingText.textContent = text; console.info('[status]', text); }
+/** The loading screen: a line of text, and a bar when there is a fraction to show. */
+function status(text: string, fraction?: number): void {
+  loading.classList.remove('hidden');
+  if (loadingText.textContent !== text) { loadingText.textContent = text; if (fraction === undefined) console.info('[status]', text); }
+  loadingBar.classList.toggle('hidden', fraction === undefined);
+  if (fraction !== undefined) loadingFill.style.width = `${Math.round(Math.max(0, Math.min(1, fraction)) * 100)}%`;
+}
 
 // Nothing may fail silently: an uncaught error is shown on the page, not only in the console.
 function showFatal(what: string): void {
@@ -194,13 +224,14 @@ async function makeRenderer(canvas: HTMLCanvasElement, vfs: Vfs): Promise<Render
 async function prepare(config: RoomConfig, serverinfo: string): Promise<{ vfs: Vfs; sim: QtSim; progsId: number; maps: Map<string, number>; packs: string[] }> {
   status('Loading packs');
   await base();
+  await prefetchPacks;
   const refs: PackRef[] = [];
   if (!FAKE) {
     for (const n of ['maps-lq', 'maps-qt']) refs.push({ id: n });
     refs.push(config.mod ? { id: config.mod.id, ...(config.mod.url ? { url: config.mod.url } : {}) } : { id: 'qtdm' });
     for (const p of config.packs) refs.push({ id: p.id, ...(p.url ? { url: p.url } : {}) });
   }
-  await content.loadRoom(refs, (d, t) => status(`Loading packs ${t ? Math.round((d / t) * 100) : 0}%`));
+  await content.loadRoom(refs, (d, t) => status(t ? `Loading packs ${mb(d)} / ${mb(t)} MB` : 'Loading packs', t ? d / t : undefined));
   const vfs = content.vfs;
   const packs = vfs.mounts().filter((m) => m.role !== 'idpak').map((m) => m.id);
 
@@ -310,11 +341,12 @@ async function showMenu(notice = ''): Promise<void> {
   menuRoot.classList.remove('hidden');
   // the 3D player preview, drawn from the base pack (and the player's id paks)
   if (!previewModule && !FAKE) {
-    try { await base(); const load = previewModules['./render/preview.ts']; if (load) previewModule = await load() as typeof previewModule; } catch (e) { console.warn('[menu] no 3D preview:', e); }
+    try { await bootLoading(base()); const load = previewModules['./render/preview.ts']; if (load) previewModule = await load() as typeof previewModule; } catch (e) { console.warn('[menu] no 3D preview:', e); }
   }
   document.title = 'Quake Town';
   try {
     const m = await import('./menu/index.js');
+    loading.classList.add('hidden');
     const req = await m.showMenu(menuRoot, {
       central, ...(notice ? { notice } : {}),
       packIndex: () => loader.index() as never,
