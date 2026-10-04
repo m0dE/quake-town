@@ -11,7 +11,8 @@
     "build:sim": "node tools/sim/build-sim.mjs",
     "build:mod": "node tools/qc/build-mod.mjs",
     "build:content": "node tools/content/build-content.mjs",
-    "export": "node tools/export.mjs"
+    "export": "node tools/export.mjs",
+    "deploy:indiefun": "node --env-file-if-exists=.env.local tools/deploy-indiefun.mjs"
   },
   "dependencies": {
     "arrr-network": "file:vendor/arrr-network-2.3.0.tgz",

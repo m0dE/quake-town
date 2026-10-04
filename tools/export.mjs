@@ -56,7 +56,9 @@ if (!flag('no-build')) {
     execFileSync('npx', ['tsc', '--noEmit'], { cwd: ROOT, stdio: 'inherit' });
   }
   console.log(`building into ${path.relative(ROOT, SITE)}/`);
-  execFileSync('npx', ['vite', 'build', '--outDir', path.relative(ROOT, SITE), '--emptyOutDir'], { cwd: ROOT, stdio: 'inherit' });
+  // A production build whatever the shell says: NODE_ENV=development makes vite emit a dev bundle
+  // (import.meta.env.DEV true: no indie.fun SDK, the test harness reachable).
+  execFileSync('npx', ['vite', 'build', '--outDir', path.relative(ROOT, SITE), '--emptyOutDir'], { cwd: ROOT, stdio: 'inherit', env: { ...process.env, NODE_ENV: 'production' } });
 }
 if (!existsSync(path.join(SITE, 'index.html'))) fail(`no index.html in ${SITE} — run without --no-build`);
 
