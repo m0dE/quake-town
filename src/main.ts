@@ -15,7 +15,7 @@
  *   ?probe=1                  install the arrr harness probe (arena judge)
  *   ?exec=<commands>          console text run at boot (tests: "r_preset classic")
  */
-import { sandboxed } from './sandbox.js';   // first: storage stand-ins before anything reads storage
+import { serviceWorkers } from './sandbox.js';   // first: storage stand-ins before anything reads storage
 import { APP_ID as LISTED_APP_ID, API_KEY as LISTED_API_KEY } from './rooms/listing.js';
 import './main.css';
 import { lockstep } from 'arrr-network';
@@ -43,7 +43,7 @@ const params = new URLSearchParams(location.search);
 // Quake Town has no service worker. One left on this origin by another app that ran on the
 // same host:port answers our pack downloads with its cached page: remove it and reload once.
 // (A sandboxed frame has no service workers, and reading navigator.serviceWorker there throws.)
-if (!sandboxed && 'serviceWorker' in navigator) {
+if (serviceWorkers) {
   void navigator.serviceWorker.getRegistrations().then(async (regs) => {
     if (!regs.length && !navigator.serviceWorker.controller) return;
     console.warn(`[boot] removing ${regs.length} service worker(s) left on this origin by another app:`, regs.map((r) => r.active?.scriptURL ?? r.scope));

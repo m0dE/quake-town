@@ -5,7 +5,7 @@
  * a SecurityError, `typeof localStorage` included. This code and arrr-network both check
  * storage that way, so the first one would end the boot with a black screen.
  *
- * Imported first by main.ts: when storage is blocked, localStorage and sessionStorage become
+ * Imported first by main.ts: whichever storage is blocked, localStorage and sessionStorage become
  * in-memory stand-ins (settings, favourites and the ARRR sign-in last until the tab closes),
  * and indexedDB reads as undefined, so the pack cache falls back to memory (content/store.ts).
  * Outside a sandbox nothing changes.
@@ -28,15 +28,20 @@ function blocked(read: () => unknown): boolean {
   try { read(); return false; } catch { return true; }
 }
 
-/** True when the page runs with an opaque origin (a sandbox without allow-same-origin). */
-export const sandboxed = blocked(() => window.localStorage);
-
-if (sandboxed) {
-  const define = (name: string, value: unknown): void => {
-    try { Object.defineProperty(window, name, { value, configurable: true, writable: true }); } catch (err) { console.warn(`[sandbox] could not replace ${name}:`, err); }
-  };
-  define('localStorage', new MemoryStorage());
-  if (blocked(() => window.sessionStorage)) define('sessionStorage', new MemoryStorage());
-  if (blocked(() => window.indexedDB)) define('indexedDB', undefined);
-  console.info('[sandbox] storage is blocked in this frame: settings last until the tab closes');
+/**
+ * Each one is checked on its own: indie.fun puts its own localStorage and sessionStorage in
+ * place before this runs (localStorage kept through the parent page, so settings do last
+ * there), which leaves indexedDB and navigator.serviceWorker throwing all the same.
+ */
+const define = (name: string, value: unknown): void => {
+  try { Object.defineProperty(window, name, { value, configurable: true, writable: true }); } catch (err) { console.warn(`[sandbox] could not replace ${name}:`, err); }
+};
+const replaced: string[] = [];
+for (const name of ['localStorage', 'sessionStorage'] as const) {
+  if (blocked(() => window[name].getItem('qt'))) { define(name, new MemoryStorage()); replaced.push(name); }
 }
+if (blocked(() => window.indexedDB)) { define('indexedDB', undefined); replaced.push('indexedDB'); }
+if (replaced.length) console.info(`[sandbox] blocked in this frame, in memory instead: ${replaced.join(', ')}`);
+
+/** False in a sandboxed frame, where even reading navigator.serviceWorker throws. */
+export const serviceWorkers = !blocked(() => navigator.serviceWorker) && 'serviceWorker' in navigator;
