@@ -29,7 +29,7 @@ import type { PackRef, Vfs } from './content/types.js';
 import { QtSim } from './sim/qtsim.js';
 import { createFakeSim } from './sim/fake.js';
 import { decodeRoomId, defaultConfig, encodeRoomId, toServerinfo, isMode, type RoomConfig } from './rooms/index.js';
-import type { PlayRequest } from './menu/index.js';
+import type { MenuDeps, PlayRequest } from './menu/index.js';
 import type { Game } from './game/game.js';
 import type { RendererLike } from './game/topdown.js';
 import { decodeDemo, loadDemo, listDemos, type DemoFile } from './demo/demo.js';
@@ -90,18 +90,25 @@ const BUILTIN_ROOM_PACKS = ['maps-lq', 'maps-qt', 'qtdm'];
  * time: two concurrent downloads of one URL make Chromium fail one (ERR_CACHE_WRITE_FAILURE).
  * The base pack first, which is all the menu waits for; the room packs after it, in the background.
  */
-const prefetch = { done: 0, total: 0 };
+const prefetch = { done: 0, total: 0 };    // bytes, over every pack below
 const prefetchBase = (async () => {
   try {
-    await loader.index();
-    await loader.resolve({ id: 'base' }, (d, t) => { prefetch.done = d; prefetch.total = t; }).catch((e) => console.warn('[boot] prefetch base:', e));
+    const idx = await loader.index();
+    prefetch.total = idx.filter((e) => ['base', ...BUILTIN_ROOM_PACKS].includes(e.name)).reduce((a, e) => a + (e.bytes ?? 0), 0);
+    await prefetchOne('base');
   } catch (err) { console.warn('[boot] pack prefetch:', err); }
 })();
 const prefetchPacks = (async () => {
   await prefetchBase;
-  for (const n of BUILTIN_ROOM_PACKS) await loader.resolve({ id: n }).catch((e) => console.warn(`[boot] prefetch ${n}:`, e));
+  for (const n of BUILTIN_ROOM_PACKS) await prefetchOne(n);
 })();
+async function prefetchOne(name: string): Promise<void> {
+  let got = 0;
+  await loader.resolve({ id: name }, (d) => { prefetch.done += d - got; got = d; }).catch((e) => console.warn(`[boot] prefetch ${name}:`, e));
+}
 const wasmBytes: Promise<Uint8Array | null> = FAKE ? Promise.resolve(null) : fetch('qtsim.wasm').then(async (r) => (r.ok ? new Uint8Array(await r.arrayBuffer()) : null)).catch(() => null);
+const menuModule = import('./menu/index.js');
+menuModule.catch(() => { /* reported at showMenu */ });
 const gameModule = import('./game/game.js');
 gameModule.catch(() => { /* reported at play */ });
 
@@ -125,17 +132,17 @@ function base(): Promise<{ vfs: Vfs; gfx: Gfx }> {
   return basePromise;
 }
 
-/** Wait for `p` with the loading screen up, its bar following the base pack's download. */
-async function bootLoading<T>(p: Promise<T>): Promise<T> {
+/** Wait for `p` with the loading screen up, its bar following the pack prefetch. */
+async function waitWithBar<T>(p: Promise<T>, label: string): Promise<T> {
   let done = false;
-  void p.finally(() => { done = true; });
+  void p.finally(() => { done = true; }).catch(() => undefined);
   const tick = (): void => {
     if (done) return;
-    status(prefetch.total ? `Loading ${mb(prefetch.done)} / ${mb(prefetch.total)} MB` : 'Loading', prefetch.total ? prefetch.done / prefetch.total : 0);
+    status(prefetch.total ? `${label} ${mb(prefetch.done)} / ${mb(prefetch.total)} MB` : label, prefetch.total ? prefetch.done / prefetch.total : undefined);
     setTimeout(tick, 100);
   };
   tick();
-  try { return await p; } finally { loading.classList.add('hidden'); }
+  return p;
 }
 const mb = (n: number): string => (n / 1048576).toFixed(1);
 
@@ -223,8 +230,7 @@ async function makeRenderer(canvas: HTMLCanvasElement, vfs: Vfs): Promise<Render
 /** Mount the room's packs and load progs + every map of the rotation into the (one) sim module. */
 async function prepare(config: RoomConfig, serverinfo: string): Promise<{ vfs: Vfs; sim: QtSim; progsId: number; maps: Map<string, number>; packs: string[] }> {
   status('Loading packs');
-  await base();
-  await prefetchPacks;
+  await waitWithBar(Promise.all([base(), prefetchPacks]), 'Loading packs');
   const refs: PackRef[] = [];
   if (!FAKE) {
     for (const n of ['maps-lq', 'maps-qt']) refs.push({ id: n });
@@ -278,7 +284,7 @@ async function play(req: PlayRequest, demo?: DemoFile): Promise<void> {
     hideMenu();
   } catch { /* no menu */ }
   try {
-    const { gfx: g } = await base();
+    const { gfx: g } = await waitWithBar(base(), 'Loading packs');
     const p = await prepare(req.config, req.serverinfo);
     const { Game } = await gameModule;
     status(demo ? 'Starting the demo' : req.offline ? 'Starting practice' : 'Connecting');
@@ -339,30 +345,44 @@ let previewModule: { renderCharacterPreview: (c: HTMLCanvasElement, v: Vfs, look
 
 async function showMenu(notice = ''): Promise<void> {
   menuRoot.classList.remove('hidden');
-  // the 3D player preview, drawn from the base pack (and the player's id paks)
-  if (!previewModule && !FAKE) {
-    try { await bootLoading(base()); const load = previewModules['./render/preview.ts']; if (load) previewModule = await load() as typeof previewModule; } catch (e) { console.warn('[menu] no 3D preview:', e); }
-  }
   document.title = 'Quake Town';
   try {
-    const m = await import('./menu/index.js');
+    const m = await menuModule;
     loading.classList.add('hidden');
-    const req = await m.showMenu(menuRoot, {
+    const deps: MenuDeps = {
       central, ...(notice ? { notice } : {}),
       packIndex: () => loader.index() as never,
       cacheLocalPack: (file) => content.cacheLocalPack(file),
-      ...(previewModule ? {
-        renderPreview: (canvas: HTMLCanvasElement, look: { model: string; skin: string; topcolor: number; bottomcolor: number }, t: number, yaw?: number) => previewModule!.renderCharacterPreview(canvas, content.vfs, {
-          model: `progs/${look.model || 'player'}.mdl`, skin: Number.parseInt(look.skin, 10) || 0, top: look.topcolor, bottom: look.bottomcolor,
-        }, t, undefined, yaw),
-      } : {}),
-      models: () => content.vfs.list('progs/').filter((p) => /^progs\/player\w*\.mdl$/.test(p)).map((p) => p.slice(6, -4)),
+      models: () => {
+        const list = content.vfs.list('progs/').filter((p) => /^progs\/player\w*\.mdl$/.test(p)).map((p) => p.slice(6, -4));
+        return list.length ? list : ['player'];
+      },
+    };
+    // The menu does not wait for the base pack: it draws a stand-in character until the pack
+    // and the renderer's preview are in, and the 3D model from the next frame on.
+    void withPreview().then((preview) => {
+      if (!preview) return;
+      deps.renderPreview = (canvas, look, t, yaw) => preview.renderCharacterPreview(canvas, content.vfs, {
+        model: `progs/${look.model || 'player'}.mdl`, skin: Number.parseInt(look.skin, 10) || 0, top: look.topcolor, bottom: look.bottomcolor,
+      }, t, undefined, yaw);
     });
+    const req = await m.showMenu(menuRoot, deps);
     await play(req);
   } catch (err) {
     console.error('[menu]', err);
+    loading.classList.add('hidden');
     menuRoot.innerHTML = `<div style="color:#e8d8b0;font:16px monospace;padding:40px">The menu did not load: ${String(err)}<br><br>Press ~ for the console: <b>connect &lt;room&gt;</b> or <b>practice</b>.</div>`;
   }
+}
+
+/** The 3D player preview, drawn from the base pack (and the player's id paks), once both are in. */
+async function withPreview(): Promise<typeof previewModule> {
+  if (previewModule || FAKE) return previewModule;
+  try {
+    const [, mod] = await Promise.all([base(), previewModules['./render/preview.ts']?.()]);
+    previewModule = (mod as typeof previewModule) ?? null;
+  } catch (e) { console.warn('[menu] no 3D preview:', e); }
+  return previewModule;
 }
 
 // ------------------------------------------------------------------ commands

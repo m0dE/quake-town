@@ -95,11 +95,6 @@ export function drawPlaceholder(canvas: HTMLCanvasElement, look: PlayerLook, t: 
  * the placeholder otherwise. Drag turns it. `start()` / `stop()` run the animation.
  */
 export function characterView(deps: MenuDeps, className = 'preview'): { canvas: HTMLCanvasElement; start(): void; stop(): void } {
-  const canvas = document.createElement('canvas');
-  canvas.className = className;
-  canvas.width = 360;
-  canvas.height = 480;
-  canvas.setAttribute('aria-label', 'Your character');
   let raf = 0;
   let turn = 0;
   let dragX: number | null = null;
@@ -107,20 +102,33 @@ export function characterView(deps: MenuDeps, className = 'preview'): { canvas: 
   let heldYaw: number | null = null;
   let heldT = 0;
   let now = 0;
-  canvas.addEventListener('pointerdown', (e) => {
-    dragX = e.clientX;
-    canvas.setPointerCapture(e.pointerId);
-    if (heldYaw === null) { heldT = now; heldYaw = autoYaw(now); }
-  });
-  canvas.addEventListener('pointermove', (e) => {
-    if (dragX === null) return;
-    const dx = e.clientX - dragX;
-    dragX = e.clientX;
-    turn += dx / 80;
-    if (heldYaw !== null) heldYaw += dx * 0.5;
-  });
-  canvas.addEventListener('pointerup', () => { dragX = null; });
-  canvas.addEventListener('pointercancel', () => { dragX = null; });
+  const make = (): HTMLCanvasElement => {
+    const c = document.createElement('canvas');
+    c.className = className;
+    c.width = 360;
+    c.height = 480;
+    c.setAttribute('aria-label', 'Your character');
+    c.addEventListener('pointerdown', (e) => {
+      dragX = e.clientX;
+      c.setPointerCapture(e.pointerId);
+      if (heldYaw === null) { heldT = now; heldYaw = autoYaw(now); }
+    });
+    c.addEventListener('pointermove', (e) => {
+      if (dragX === null) return;
+      const dx = e.clientX - dragX;
+      dragX = e.clientX;
+      turn += dx / 80;
+      if (heldYaw !== null) heldYaw += dx * 0.5;
+    });
+    c.addEventListener('pointerup', () => { dragX = null; });
+    c.addEventListener('pointercancel', () => { dragX = null; });
+    return c;
+  };
+  let canvas = make();
+  const first = canvas;
+  // The menu can come up before the base pack: the placeholder draws with a 2D context, and a
+  // canvas that has one can never get WebGL, so the 3D preview gets a fresh canvas in its place.
+  let placeholderDrawn = false;
 
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const t0 = performance.now();
@@ -129,6 +137,7 @@ export function characterView(deps: MenuDeps, className = 'preview'): { canvas: 
     now = t;
     const look = playerLook();
     if (deps.renderPreview) {
+      if (placeholderDrawn) { const fresh = make(); canvas.replaceWith(fresh); canvas = fresh; placeholderDrawn = false; }
       // The renderer sizes its own WebGL canvas. `t` animates (idle stance); the yaw turns by
       // itself until the player drags it, then holds where they left it.
       deps.renderPreview(canvas, look, t, heldYaw ?? undefined);
@@ -138,11 +147,12 @@ export function characterView(deps: MenuDeps, className = 'preview'): { canvas: 
       const hh = Math.round(canvas.clientHeight * dpr);
       if (w && hh && (canvas.width !== w || canvas.height !== hh)) { canvas.width = w; canvas.height = hh; }
       drawPlaceholder(canvas, look, heldYaw === null ? t : heldT, turn);
+      placeholderDrawn = true;
     }
     raf = requestAnimationFrame(frame);
   };
   return {
-    canvas,
+    canvas: first,
     start() { cancelAnimationFrame(raf); raf = requestAnimationFrame(frame); },
     stop() { cancelAnimationFrame(raf); },
   };
