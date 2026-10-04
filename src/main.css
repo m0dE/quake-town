@@ -3,5 +3,8 @@ html, body { margin: 0; height: 100%; background: #0b0907; overflow: hidden; }
 #app { position: fixed; inset: 0; }
 #game { position: absolute; inset: 0; }
 #menu { position: absolute; inset: 0; z-index: 10; }
-#menu.hidden, #loading.hidden { display: none; }
+#menu.hidden, #loading.hidden, #loading-bar.hidden { display: none; }
 #loading { position: absolute; inset: 0; z-index: 20; display: grid; place-items: center; background: #0b0907; color: #d8c8a0; font: 600 15px/1.4 ui-monospace, Menlo, Consolas, monospace; letter-spacing: 0.08em; text-transform: uppercase; }
+#loading-text { text-align: center; }
+#loading-bar { width: min(360px, 70vw); height: 6px; margin-top: 12px; background: #2a2218; border: 1px solid #4a3a26; }
+#loading-bar > div { width: 0; height: 100%; background: #d9822b; transition: width 0.1s linear; }

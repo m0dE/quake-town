@@ -40,7 +40,8 @@ const replaced: string[] = [];
 for (const name of ['localStorage', 'sessionStorage'] as const) {
   if (blocked(() => window[name].getItem('qt'))) { define(name, new MemoryStorage()); replaced.push(name); }
 }
-if (blocked(() => window.indexedDB)) { define('indexedDB', undefined); replaced.push('indexedDB'); }
+// An opaque origin has no IndexedDB: reading it may work and open() throw, so the origin decides.
+if (self.origin === 'null' || blocked(() => window.indexedDB)) { define('indexedDB', undefined); replaced.push('indexedDB'); }
 if (replaced.length) console.info(`[sandbox] blocked in this frame, in memory instead: ${replaced.join(', ')}`);
 
 /** False in a sandboxed frame, where even reading navigator.serviceWorker throws. */
